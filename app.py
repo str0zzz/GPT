@@ -1,19 +1,34 @@
-import streamlit as st
-import os, io, base64, json, time, datetime, random, re, hashlib, tempfile
-from PIL import Image
-import numpy as np
+import base64
+import datetime
+import hashlib
+import io
+import json
+import os
+import random
+import re
+import tempfile
+import time
+
 import google.generativeai as genai
+import numpy as np
+import streamlit as st
 from groq import Groq
+from PIL import Image
 
-st.set_page_config(page_title="KLMGPT", page_icon="X", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="KLMGPT",
+    page_icon="X",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-GEMINI_API_KEY = "AIzaSyB8RN6KtskPXKcmFUbwLjbfXKLgyEkA9L6"
-GROQ_API_KEY = "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"
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-genai.configure(api_key=GEMINI_API_KEY)
-groq_client = Groq(api_key=GROQ_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
-gemini_vision = genai.GenerativeModel('gemini-2.0-flash-exp')
+gemini_model = genai.GenerativeModel(
+    "gemini-2.0-flash-exp", api_key=st.secrets["GEMINI_API_KEY"])
+gemini_vision = genai.GenerativeModel(
+    "gemini-2.0-flash-exp", api_key=st.secrets["GEMINI_API_KEY"])
 
 def init_state():
     keys = [
