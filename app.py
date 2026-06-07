@@ -19,16 +19,13 @@ st.set_page_config(
     page_title="KLMGPT",
     page_icon="X",
     layout="wide",
-    initial_sidebar_state="expanded",
-)
+    initial_sidebar_state="expanded")
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+groq_client = Groq(api_key=st.secrets.get("GROQ_API_KEY"))
 
-gemini_model = genai.GenerativeModel(
-    "gemini-2.0-flash-exp", api_key=st.secrets["GEMINI_API_KEY"])
-gemini_vision = genai.GenerativeModel(
-    "gemini-2.0-flash-exp", api_key=st.secrets["GEMINI_API_KEY"])
+gemini_model = genai.GenerativeModel("gemini-2.0-flash-exp")
+gemini_vision = genai.GenerativeModel("gemini-2.0-flash-exp")
 
 def init_state():
     keys = [
