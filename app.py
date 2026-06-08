@@ -29,7 +29,7 @@ genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 groq_client = Groq(api_key=st.secrets.get("GROQ_API_KEY", ""))
 
 # ─── Updated Models (2026 Latest) ──────────────────────────────────────────
-GEMINI_TEXT_MODEL = "gemini-3.5-flash-lite"          # Latest text model
+GEMINI_TEXT_MODEL = "gemini-3.5-flash"          # Latest text model
 GEMINI_VISION_MODEL = "gemini-3.5-flash"        # Latest vision model
 GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image"   # Nano Banana 2 - native image generation
 
