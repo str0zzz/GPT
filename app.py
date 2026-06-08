@@ -34,15 +34,21 @@ chatgpt_client = OpenAI(
 )
 
 # DeepSeek API
-deepseek_client = OpenAI(
-    api_key=st.secrets.get("DEEPSEEK_API_KEY", ""),
-    base_url="https://api.deepseek.com"
-)
+deepseek_api_key = st.secrets.get("DEEPSEEK_API_KEY", "")
+if deepseek_api_key:
+    deepseek_client = OpenAI(
+        api_key=deepseek_api_key,
+        base_url="https://api.deepseek.com"
+    )
+else:
+    deepseek_client = None
 
 # Groq API
-groq_client = Groq(
-    api_key=st.secrets["GROQ_API_KEY"]
-)
+groq_api_key = st.secrets.get("GROQ_API_KEY", "")
+if groq_api_key:
+    groq_client = Groq(api_key=groq_api_key)
+else:
+    groq_client = None
 
 # Google Gemini
 import google.generativeai as genai
@@ -184,6 +190,8 @@ def get_gemini_response(prompt, image=None, web_context=""):
         return f"KLMGPT: {str(e)}"
 
 def get_groq_response(prompt, web_context=""):
+    if groq_client is None:
+        return "KLMGPT: Groq API key not configured. Set GROQ_API_KEY in secrets."
     try:
         sp = get_system_prompt()
         if web_context:
@@ -205,6 +213,8 @@ def get_groq_response(prompt, web_context=""):
         return f"KLMGPT: {str(e)}"
 
 def get_deepseek_response(prompt, web_context=""):
+    if deepseek_client is None:
+        return "KLMGPT: DeepSeek API key not configured. Set DEEPSEEK_API_KEY in secrets."
     try:
         sp = get_system_prompt()
         if web_context:
