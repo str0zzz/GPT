@@ -21,7 +21,6 @@ import requests
 import streamlit as st
 from gtts import gTTS
 from groq import Groq
-from openai import OpenAI
 from PIL import Image
 from streamlit_webrtc import (
     webrtc_streamer,
@@ -56,10 +55,9 @@ def get_kerala_time():
     return now.strftime("%B %d, %Y"), now.strftime("%I:%M:%S %p %Z"), now.strftime("%Y-%m-%d")
 
 # ============================================================
-# API CLIENTS - PROPER INITIALIZATION
+# API CLIENTS - ChatGPT REMOVED
 # ============================================================
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "").strip()
 DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", "").strip()
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "").strip()
 
@@ -73,21 +71,10 @@ if GEMINI_API_KEY:
 else:
     gemini_available = False
 
-# OpenAI
-if OPENAI_API_KEY:
-    try:
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
-        chatgpt_available = True
-    except:
-        openai_client = None
-        chatgpt_available = False
-else:
-    openai_client = None
-    chatgpt_available = False
-
 # DeepSeek
 if DEEPSEEK_API_KEY:
     try:
+        from openai import OpenAI
         deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
         deepseek_available = True
     except:
@@ -186,12 +173,11 @@ def get_system_prompt():
     return NORMAL_SYSTEM.format(date=date_str, time=time_str)
 
 # ============================================================
-# MODEL FUNCTIONS - COMPLETELY REWRITTEN
+# MODEL FUNCTIONS
 # ============================================================
 current_api_model = "None"
 
 def call_gemini(prompt, image=None):
-    """Call Gemini - returns response text or None if unavailable"""
     global current_api_model
     if not gemini_available:
         return None
@@ -231,43 +217,40 @@ def call_gemini(prompt, image=None):
         
     except Exception as e:
         err = str(e).lower()
-        if "api_key" in err or "permission" in err or "not found" in err or "invalid" in err:
+        if "api_key" in err or "permission" in err or "not found" in err or "invalid" in err or "quota" in err or "429" in err:
             return None
         return f"[Gemini: {str(e)[:150]}]"
 
-def call_chatgpt(prompt):
-    """Call ChatGPT - returns response text or None if unavailable"""
+def call_groq(prompt):
     global current_api_model
-    if not chatgpt_available:
+    if not groq_available:
         return None
     
     try:
         sp = get_system_prompt()
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
+        response = groq_client.chat.completions.create(
+            model="mixtral-8x7b-32768",
             messages=[
                 {"role": "system", "content": sp},
                 {"role": "user", "content": prompt},
             ],
             temperature=1.2,
             max_tokens=8192,
+            top_p=0.95,
         )
-        current_api_model = "ChatGPT"
+        current_api_model = "Groq"
         return response.choices[0].message.content
         
     except Exception as e:
         err_str = str(e)
         err_lower = err_str.lower()
-        if "429" in err_str or "quota" in err_lower or "insufficient_quota" in err_lower:
-            return None
-        if "402" in err_str or "insufficient balance" in err_lower:
+        if "429" in err_str or "quota" in err_lower:
             return None
         if "401" in err_str or "invalid" in err_lower or "key" in err_lower:
             return None
-        return f"[ChatGPT: {err_str[:150]}]"
+        return f"[Groq: {err_str[:150]}]"
 
 def call_deepseek(prompt):
-    """Call DeepSeek - returns response text or None if unavailable"""
     global current_api_model
     if not deepseek_available:
         return None
@@ -297,43 +280,12 @@ def call_deepseek(prompt):
             return None
         return f"[DeepSeek: {err_str[:150]}]"
 
-def call_groq(prompt):
-    """Call Groq - returns response text or None if unavailable"""
-    global current_api_model
-    if not groq_available:
-        return None
-    
-    try:
-        sp = get_system_prompt()
-        response = groq_client.chat.completions.create(
-            model="mixtral-8x7b-32768",
-            messages=[
-                {"role": "system", "content": sp},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=1.2,
-            max_tokens=8192,
-            top_p=0.95,
-        )
-        current_api_model = "Groq"
-        return response.choices[0].message.content
-        
-    except Exception as e:
-        err_str = str(e)
-        err_lower = err_str.lower()
-        if "429" in err_str or "quota" in err_lower:
-            return None
-        if "401" in err_str or "invalid" in err_lower or "key" in err_lower:
-            return None
-        return f"[Groq: {err_str[:150]}]"
-
 def call_ai(prompt, image=None):
-    """Auto-fallback across all models"""
     global current_api_model
     
     selected = st.session_state.get("current_model", "Gemini")
     
-    all_models = ["Gemini", "ChatGPT", "Groq", "DeepSeek"]
+    all_models = ["Gemini", "Groq", "DeepSeek"]
     models_to_try = [selected]
     for m in all_models:
         if m != selected and m not in models_to_try:
@@ -345,8 +297,6 @@ def call_ai(prompt, image=None):
         try:
             if model_name == "Gemini":
                 resp = call_gemini(prompt, image)
-            elif model_name == "ChatGPT":
-                resp = call_chatgpt(prompt)
             elif model_name == "Groq":
                 resp = call_groq(prompt)
             elif model_name == "DeepSeek":
@@ -365,7 +315,6 @@ def call_ai(prompt, image=None):
     
     available = []
     if gemini_available: available.append("Gemini")
-    if chatgpt_available: available.append("ChatGPT")
     if groq_available: available.append("Groq")
     if deepseek_available: available.append("DeepSeek")
     
@@ -374,24 +323,8 @@ def call_ai(prompt, image=None):
     return f"[Error] Tried: {', '.join(models_to_try)}. Available: {', '.join(available)}. Details: {error_detail}"
 
 # ============================================================
-# IMAGE GENERATION
+# IMAGE GENERATION - REMOVED DALL-E (ChatGPT dependent)
 # ============================================================
-def generate_image_dalle(prompt):
-    try:
-        if not chatgpt_available:
-            return None, "OpenAI not available."
-        
-        response = openai_client.images.generate(
-            model="dall-e-3",
-            prompt=prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1,
-        )
-        image_url = response.data[0].url
-        return image_url, None
-    except Exception as e:
-        return None, f"DALL-E: {str(e)[:200]}"
 
 # ============================================================
 # TEXT-TO-SPEECH
@@ -406,22 +339,10 @@ def text_to_speech(text, lang="ml"):
         return None
 
 # ============================================================
-# SPEECH-TO-TEXT
+# SPEECH-TO-TEXT - REMOVED Whisper (ChatGPT dependent)
 # ============================================================
 def speech_to_text(audio_bytes):
     try:
-        if chatgpt_available:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_bytes)
-                wav_path = tmp.name
-            
-            with open(wav_path, "rb") as f:
-                transcript = openai_client.audio.transcriptions.create(
-                    model="whisper-1", file=f
-                )
-            os.unlink(wav_path)
-            return transcript.text
-        
         import speech_recognition as sr
         recognizer = sr.Recognizer()
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
@@ -433,7 +354,7 @@ def speech_to_text(audio_bytes):
             text = recognizer.recognize_google(audio, language="ml-IN")
         os.unlink(wav_path)
         return text
-    except:
+    except Exception as e:
         return None
 
 # ============================================================
@@ -470,33 +391,6 @@ def process_uploaded_file(uploaded_file):
     
     except Exception as e:
         return {"name": uploaded_file.name, "type": "error", "data": str(e)}
-
-# ============================================================
-# WEB SEARCH
-# ============================================================
-def web_search(query):
-    try:
-        url = "https://api.duckduckgo.com/"
-        params = {"q": query, "format": "json", "no_html": 1, "skip_disambig": 1}
-        headers = {"User-Agent": "KLMGPT/2.0 (Hydra Strozzz)"}
-        r = requests.get(url, params=params, headers=headers, timeout=10)
-        data = r.json()
-        
-        results = []
-        if data.get("AbstractText"):
-            results.append(data["AbstractText"])
-        if data.get("Answer"):
-            results.append(data["Answer"])
-        for topic in data.get("RelatedTopics", [])[:5]:
-            if "Text" in topic:
-                results.append(topic["Text"])
-            elif "Topics" in topic:
-                for sub in topic["Topics"][:3]:
-                    if "Text" in sub:
-                        results.append(sub["Text"])
-        return "\n".join(results[:8]) if results else "No search results found."
-    except:
-        return "Web search unavailable."
 
 # ============================================================
 # VIDEO PROCESSOR
@@ -614,8 +508,8 @@ def main_ui():
         
         st.session_state.current_model = st.selectbox(
             "Model",
-            ["Gemini", "ChatGPT", "Groq", "DeepSeek"],
-            index=["Gemini", "ChatGPT", "Groq", "DeepSeek"].index(
+            ["Gemini", "Groq", "DeepSeek"],
+            index=["Gemini", "Groq", "DeepSeek"].index(
                 st.session_state.get("current_model", "Gemini")
             ),
         )
@@ -627,7 +521,6 @@ def main_ui():
         
         api_status = []
         if gemini_available: api_status.append("Gemini")
-        if chatgpt_available: api_status.append("ChatGPT")
         if groq_available: api_status.append("Groq")
         if deepseek_available: api_status.append("DeepSeek")
         st.markdown(f"APIs: {', '.join(api_status) if api_status else 'None configured'}")
@@ -667,7 +560,7 @@ def main_ui():
     # ============================================================
     with tabs[0]:
         st.markdown("### Chat & Image Generation")
-        st.markdown("*Ask anything - hack, code, chat, generate images...*")
+        st.markdown("*Ask anything - hack, code, chat...*")
         
         ok, remaining = check_chat_limit()
         if remaining <= 5 and remaining > 0:
@@ -684,11 +577,6 @@ def main_ui():
                     f"<div class='chat-message {cls}'><b>{'YOU' if msg['role']=='user' else 'KLMGPT'}:</b> {msg['content']}</div>",
                     unsafe_allow_html=True,
                 )
-                if "image" in msg and msg["image"]:
-                    st.markdown(
-                        f"<div class='generated-image'><img src='{msg['image']}' width='100%'/></div>",
-                        unsafe_allow_html=True,
-                    )
         
         # Input
         col1, col2 = st.columns([6, 1])
@@ -697,13 +585,10 @@ def main_ui():
         with col2:
             send_btn = st.button("Send", use_container_width=True)
         
-        col_clr, col_gen = st.columns([1, 1])
-        with col_clr:
+        with st.columns([1, 1])[0]:
             if st.button("Clear Chat", use_container_width=True):
                 st.session_state.chat_history = []
                 st.rerun()
-        with col_gen:
-            gen_img_btn = st.button("Generate Image", use_container_width=True)
         
         # Process message
         if send_btn and user_input:
@@ -720,64 +605,15 @@ def main_ui():
                 increment_chat_count()
                 st.rerun()
             
-            # Check for image keywords
-            img_keywords = ["generate image", "create image", "make an image", "draw", "picture of",
-                "image of", "generate a photo", "create a photo", "dalle", "dall-e",
-                "picture", "photo", "illustration"]
-            
-            wants_image = any(kw in user_input.lower() for kw in img_keywords)
-            
             st.session_state.chat_history.append({"role": "user", "content": user_input})
             
             with st.spinner(f"Thinking..."):
-                if wants_image and chatgpt_available:
-                    img_url, img_error = generate_image_dalle(user_input)
-                    if img_url:
-                        resp = f"Image generated based on: {user_input}"
-                        st.session_state.chat_history.append({"role": "assistant", "content": resp, "image": img_url})
-                        st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='generated-image'><img src='{img_url}' width='100%'/></div>", unsafe_allow_html=True)
-                    else:
-                        resp = call_ai(user_input)
-                        st.session_state.chat_history.append({"role": "assistant", "content": resp})
-                        st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                else:
-                    resp = call_ai(user_input)
-                    st.session_state.chat_history.append({"role": "assistant", "content": resp})
-                    st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                
+                resp = call_ai(user_input)
+                st.session_state.chat_history.append({"role": "assistant", "content": resp})
+                st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
                 increment_chat_count()
             
             st.rerun()
-        
-        # Generate image button
-        if gen_img_btn:
-            ok, remaining = check_chat_limit()
-            if not ok:
-                st.error("Daily chat limit reached. Come back tomorrow!")
-                st.stop()
-            
-            last_user_msg = None
-            for msg in reversed(st.session_state.chat_history):
-                if msg["role"] == "user":
-                    last_user_msg = msg["content"]
-                    break
-            
-            if last_user_msg and chatgpt_available:
-                with st.spinner("Generating image..."):
-                    img_url, img_error = generate_image_dalle(last_user_msg)
-                    if img_url:
-                        resp = f"Image generated from: {last_user_msg}"
-                        st.session_state.chat_history.append({"role": "assistant", "content": resp, "image": img_url})
-                        st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='generated-image'><img src='{img_url}' width='100%'/></div>", unsafe_allow_html=True)
-                        increment_chat_count()
-                    else:
-                        st.error(f"Image generation failed: {img_error}")
-            elif not chatgpt_available:
-                st.warning("OpenAI not available for image generation.")
-            else:
-                st.warning("No previous message to generate image from.")
         
         # Hacking Tools
         with st.expander("Hacking Tools"):
