@@ -55,11 +55,11 @@ def get_kerala_time():
     return now.strftime("%B %d, %Y"), now.strftime("%I:%M:%S %p %Z"), now.strftime("%Y-%m-%d")
 
 # ============================================================
-# API CLIENTS - ChatGPT REMOVED
+# API CLIENTS - DIRECT KEYS
 # ============================================================
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
-DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", "").strip()
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "").strip()
+GEMINI_API_KEY = "AIzaSyCJh_3h4H_AaTP2Eap0A7Bc6Kmj0QaVGU8"
+GROQ_API_KEY = "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"
+DEEPSEEK_API_KEY = "sk-8f8ccf8e11aa420c9187fddf4452ee9b"
 
 # Gemini
 if GEMINI_API_KEY:
@@ -323,10 +323,6 @@ def call_ai(prompt, image=None):
     return f"[Error] Tried: {', '.join(models_to_try)}. Available: {', '.join(available)}. Details: {error_detail}"
 
 # ============================================================
-# IMAGE GENERATION - REMOVED DALL-E (ChatGPT dependent)
-# ============================================================
-
-# ============================================================
 # TEXT-TO-SPEECH
 # ============================================================
 def text_to_speech(text, lang="ml"):
@@ -339,7 +335,7 @@ def text_to_speech(text, lang="ml"):
         return None
 
 # ============================================================
-# SPEECH-TO-TEXT - REMOVED Whisper (ChatGPT dependent)
+# SPEECH-TO-TEXT
 # ============================================================
 def speech_to_text(audio_bytes):
     try:
@@ -446,7 +442,6 @@ APP_CSS = """
     .app-header { text-align: center; padding: 12px 0; border-bottom: 1px solid #30303D; margin-bottom: 16px; }
     .app-header h1 { color: #ECECF1; margin: 0; font-size: 28px; }
     .app-header p { color: #8E8EA0; margin: 4px 0 0 0; font-size: 13px; }
-    .generated-image { border-radius: 12px; overflow: hidden; border: 1px solid #30303D; margin: 10px 0; }
     .limit-bar { background: #30303D; border-radius: 4px; height: 6px; margin: 4px 0; overflow: hidden; }
     .limit-bar-fill { background: #10A37F; height: 100%; border-radius: 4px; transition: width 0.3s ease; }
     .limit-bar-fill.warning { background: #FFA500; }
@@ -559,7 +554,7 @@ def main_ui():
     # TAB 1 - CHAT
     # ============================================================
     with tabs[0]:
-        st.markdown("### Chat & Image Generation")
+        st.markdown("### Chat")
         st.markdown("*Ask anything - hack, code, chat...*")
         
         ok, remaining = check_chat_limit()
