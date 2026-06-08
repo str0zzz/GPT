@@ -367,7 +367,7 @@ def main_ui():
             st.session_state.input_key = 0
         
         user_input = st.text_input("", 
-            placeholder="Ask anything... hack, code, chat, or type 'adult mode' for sexy chat", 
+            placeholder="Ask anything... hack, code, chat, or problem solve", 
             label_visibility="collapsed", 
             key=f"chat_input_{st.session_state.input_key}")
         
