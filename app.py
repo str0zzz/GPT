@@ -43,10 +43,37 @@ if deepseek_api_key:
 else:
     deepseek_client = None
 
-# Groq API
+# Groq API - Manual HTTP client (avoids httpx version conflict)
 groq_api_key = st.secrets.get("GROQ_API_KEY", "")
+
 if groq_api_key:
-    groq_client = Groq(api_key=groq_api_key)
+    class GroqManualClient:
+        def __init__(self, api_key):
+            self.api_key = api_key
+            self.base_url = "https://api.groq.com/openai/v1"
+        
+        def chat_completions_create(self, model, messages, temperature=1.0, max_tokens=8192, top_p=0.95):
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "top_p": top_p
+            }
+            r = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            r.raise_for_status()
+            return r.json()["choices"][0]["message"]["content"]
+    
+    groq_client = GroqManualClient(api_key=groq_api_key)
 else:
     groq_client = None
 
@@ -167,7 +194,12 @@ def get_chatgpt_response(prompt, web_context=""):
         )
         return r.choices[0].message.content
     except Exception as e:
-        return f"KLMGPT: {str(e)}"
+        error_str = str(e)
+        # Auto fallback to Gemini when ChatGPT fails
+        if "429" in error_str or "quota" in error_str or "insufficient_quota" in error_str:
+            st.warning("ChatGPT quota exceeded. Auto-switching to Gemini...")
+            return get_gemini_response(prompt, web_context=web_context)
+        return f"KLMGPT: {error_str}"
 
 def get_gemini_response(prompt, image=None, web_context=""):
     try:
@@ -187,7 +219,12 @@ def get_gemini_response(prompt, image=None, web_context=""):
                 generation_config=genai.types.GenerationConfig(temperature=0.95, max_output_tokens=8192))
         return r.text
     except Exception as e:
-        return f"KLMGPT: {str(e)}"
+        error_str = str(e)
+        # Auto fallback to ChatGPT when Gemini fails
+        if "429" in error_str or "quota" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            st.warning("Gemini quota exceeded. Auto-switching to ChatGPT...")
+            return get_chatgpt_response(prompt, web_context=web_context)
+        return f"KLMGPT: {error_str}"
 
 def get_groq_response(prompt, web_context=""):
     if groq_client is None:
@@ -201,16 +238,21 @@ def get_groq_response(prompt, web_context=""):
             {"role": "system", "content": sp},
             {"role": "user", "content": prompt}
         ]
-        r = groq_client.chat.completions.create(
+        
+        resp = groq_client.chat_completions_create(
             model="llama3-70b-8192",
             messages=msgs,
             temperature=1.0,
             max_tokens=8192,
             top_p=0.95
         )
-        return r.choices[0].message.content
+        return resp
     except Exception as e:
-        return f"KLMGPT: {str(e)}"
+        error_str = str(e)
+        if "429" in error_str or "quota" in error_str:
+            st.warning("Groq quota exceeded. Auto-switching to Gemini...")
+            return get_gemini_response(prompt, web_context=web_context)
+        return f"KLMGPT: {error_str}"
 
 def get_deepseek_response(prompt, web_context=""):
     if deepseek_client is None:
@@ -233,7 +275,11 @@ def get_deepseek_response(prompt, web_context=""):
         )
         return r.choices[0].message.content
     except Exception as e:
-        return f"KLMGPT: {str(e)}"
+        error_str = str(e)
+        if "429" in error_str or "quota" in error_str:
+            st.warning("DeepSeek quota exceeded. Auto-switching to Gemini...")
+            return get_gemini_response(prompt, web_context=web_context)
+        return f"KLMGPT: {error_str}"
 
 def determine_search_need(prompt):
     time_keywords = [
@@ -336,7 +382,7 @@ def init_state():
             elif k in ['voice_enabled','camera_active','screen_share_active','unlocked','authenticated']:
                 st.session_state[k] = False
             elif k == 'current_model':
-                st.session_state[k] = 'ChatGPT'
+                st.session_state[k] = 'Gemini'  # Default to Gemini
             else:
                 st.session_state[k] = None
 
@@ -367,7 +413,7 @@ def main_ui():
     with st.sidebar:
         st.markdown("## KLMGPT")
         st.session_state.current_model = st.selectbox(
-            "Engine", ["ChatGPT", "Gemini", "Groq", "DeepSeek"], 
+            "Engine", ["Gemini", "ChatGPT", "Groq", "DeepSeek"], 
             label_visibility="collapsed"
         )
         st.markdown(f"User: {st.session_state.user_email}")
@@ -429,7 +475,7 @@ def main_ui():
                 elif model == "DeepSeek":
                     resp = get_deepseek_response(user_input, web_context)
                 else:
-                    resp = get_chatgpt_response(user_input, web_context)
+                    resp = get_gemini_response(user_input, web_context=web_context)
                 
                 st.markdown(f"<div class='chat-msg'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
                 st.session_state.chat_history.append({"role":"assistant","content":resp})
@@ -568,7 +614,7 @@ ctypes.windll.kernel32.WaitForSingleObject(
                             elif model == "DeepSeek":
                                 resp = get_deepseek_response(text, web_context)
                             else:
-                                resp = get_chatgpt_response(text, web_context)
+                                resp = get_gemini_response(text, web_context=web_context)
                             
                             st.markdown(f"**KLMGPT:** {resp}")
                             st.session_state.chat_history.append({"role":"assistant","content":resp})
