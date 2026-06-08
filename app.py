@@ -171,7 +171,7 @@ def main_ui():
             st.session_state.login_page=True
             st.rerun()
         st.markdown("---")
-        st.markdown("KLMGPT v3.0 by Hydra Strozzz")
+        st.markdown("KLMGPT v1.0 by Hydra Strozzz")
     
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Chat + Tools", "Voice", "Image Gen", "Camera", "Screen Share"])
     
