@@ -9,4 +9,3 @@ SpeechRecognition
 cryptography
 pytz
 python-multipart
-stability-sdk
