@@ -7,3 +7,4 @@ SpeechRecognition==3.11.0
 gtts==2.5.3
 opencv-python-headless==4.10.0.84
 cryptography==42.0.8
+openai
