@@ -200,7 +200,7 @@ def call_gemini(prompt, image=None):
         sp = get_system_prompt()
         full_prompt = f"{sp}\n\nUser: {prompt}\nKLMGPT:"
         
-        safeties = [
+        safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
@@ -211,7 +211,7 @@ def call_gemini(prompt, image=None):
             vision_model = genai.GenerativeModel("gemini-1.5-flash", system_instruction=sp)
             response = vision_model.generate_content(
                 [full_prompt, image],
-                safety_settings=safeties,
+                safety_settings=safety_settings,
                 generation_config=genai.types.GenerationConfig(
                     temperature=1.2, max_output_tokens=8192, top_p=0.95
                 ),
@@ -220,7 +220,7 @@ def call_gemini(prompt, image=None):
             model = genai.GenerativeModel("gemini-1.5-flash", system_instruction=sp)
             response = model.generate_content(
                 full_prompt,
-                safety_settings=safeties,
+                safety_settings=safety_settings,
                 generation_config=genai.types.GenerationConfig(
                     temperature=1.0, max_output_tokens=8192, top_p=0.95
                 ),
@@ -231,10 +231,8 @@ def call_gemini(prompt, image=None):
         
     except Exception as e:
         err = str(e).lower()
-        # Only return None for auth/billing errors (so we can fallback)
         if "api_key" in err or "permission" in err or "not found" in err or "invalid" in err:
             return None
-        # For other errors, return the error message
         return f"[Gemini: {str(e)[:150]}]"
 
 def call_chatgpt(prompt):
@@ -260,14 +258,12 @@ def call_chatgpt(prompt):
     except Exception as e:
         err_str = str(e)
         err_lower = err_str.lower()
-        # Return None for quota/billing/auth errors so fallback works
         if "429" in err_str or "quota" in err_lower or "insufficient_quota" in err_lower:
-            return None  # Quota exceeded - try next model
+            return None
         if "402" in err_str or "insufficient balance" in err_lower:
-            return None  # Billing issue - try next model
+            return None
         if "401" in err_str or "invalid" in err_lower or "key" in err_lower:
-            return None  # Auth issue - try next model
-        # Other errors - return as string
+            return None
         return f"[ChatGPT: {err_str[:150]}]"
 
 def call_deepseek(prompt):
@@ -332,12 +328,11 @@ def call_groq(prompt):
         return f"[Groq: {err_str[:150]}]"
 
 def call_ai(prompt, image=None):
-    """Auto-fallback across all models - IMPROVED VERSION"""
+    """Auto-fallback across all models"""
     global current_api_model
     
     selected = st.session_state.get("current_model", "Gemini")
     
-    # Build priority order
     all_models = ["Gemini", "ChatGPT", "Groq", "DeepSeek"]
     models_to_try = [selected]
     for m in all_models:
@@ -359,19 +354,15 @@ def call_ai(prompt, image=None):
             else:
                 continue
             
-            # SUCCESS: got a real response (not None, not error bracket)
             if resp is not None and not resp.startswith("["):
                 return resp
             
-            # ERROR: log it
             if resp is not None and resp.startswith("["):
                 errors.append(resp)
-            # None means unavailable/skip silently
             
         except Exception as e:
             errors.append(str(e)[:80])
     
-    # Build helpful error message
     available = []
     if gemini_available: available.append("Gemini")
     if chatgpt_available: available.append("ChatGPT")
@@ -634,7 +625,6 @@ def main_ui():
         st.markdown(f"{date_str}")
         st.markdown(f"{time_str}")
         
-        # Show API status
         api_status = []
         if gemini_available: api_status.append("Gemini")
         if chatgpt_available: api_status.append("ChatGPT")
@@ -733,7 +723,7 @@ def main_ui():
             # Check for image keywords
             img_keywords = ["generate image", "create image", "make an image", "draw", "picture of",
                 "image of", "generate a photo", "create a photo", "dalle", "dall-e",
-                "\u0d1a\u0d3f\u0d24\u0d4d\u0d30\u0d02", "\u0d2b\u0d4b\u0d31\u0d4d\u0d31\u0d4b", "picture", "photo", "illustration"]
+                "picture", "photo", "illustration"]
             
             wants_image = any(kw in user_input.lower() for kw in img_keywords)
             
