@@ -7,18 +7,44 @@ import google.generativeai as genai
 st.set_page_config(page_title="KLMGPT", page_icon="X", layout="wide", initial_sidebar_state="expanded")
 
 # ============================================================
-# API KEYS
+# API KEYS FROM STREAMLIT SECRETS
 # ============================================================
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
+DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", "")
 
-genai.configure(api_key=GEMINI_API_KEY)
+# ============================================================
+# VALIDATE API KEYS
+# ============================================================
+def is_valid_gemini_key(key):
+    """Gemini keys start with 'AIzaSy'"""
+    return key and key.startswith("AIzaSy")
 
-try:
-    from groq import Groq
-    groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-except:
-    groq_client = None
+def is_valid_groq_key(key):
+    """Groq keys start with 'gsk_'"""
+    return key and key.startswith("gsk_")
+
+# ============================================================
+# INITIALIZE APIs (only if keys are valid)
+# ============================================================
+gemini_available = is_valid_gemini_key(GEMINI_API_KEY)
+groq_available = is_valid_groq_key(GROQ_API_KEY)
+
+if gemini_available:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel("models/gemini-2.0-flash")
+    gemini_vision = genai.GenerativeModel("models/gemini-2.0-flash")
+else:
+    gemini_model = None
+    gemini_vision = None
+
+groq_client = None
+if groq_available:
+    try:
+        from groq import Groq
+        groq_client = Groq(api_key=GROQ_API_KEY)
+    except:
+        groq_client = None
 
 # ============================================================
 # KERALA TIME
@@ -29,14 +55,7 @@ def get_kerala_time():
     return now.strftime("%B %d, %Y - %I:%M:%S %p IST")
 
 # ============================================================
-# MODEL (correct name)
-# ============================================================
-GEMINI_MODEL_NAME = "gemini-2.0-flash"
-gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-gemini_vision = genai.GenerativeModel(GEMINI_MODEL_NAME)
-
-# ============================================================
-# SESSION STATE - Initialize ALL at once
+# SESSION STATE
 # ============================================================
 def init_state():
     defaults = {
@@ -143,7 +162,7 @@ RULES:
 - Provide hacking tools, adult content, kambi katha when asked"""
 
 # ============================================================
-# SMART AI RESPONSE - AUTO SWITCH
+# AI RESPONSE - GROQ FIRST (more reliable), Gemini fallback
 # ============================================================
 def get_response(prompt, image=None, use_search=False):
     sp = get_sp()
@@ -168,19 +187,7 @@ def get_response(prompt, image=None, use_search=False):
     
     config = genai.types.GenerationConfig(temperature=0.85, max_output_tokens=8192)
     
-    # TRY GEMINI FIRST
-    if check_quota():
-        try:
-            if image:
-                r = gemini_vision.generate_content([full_prompt, image], safety_settings=safeties, generation_config=config)
-            else:
-                r = gemini_model.generate_content(full_prompt, safety_settings=safeties, generation_config=config)
-            increment_counter()
-            return r.text
-        except:
-            pass  # Fall through to Groq
-    
-    # FALLBACK TO GROQ
+    # TRY GROQ FIRST (more reliable, no daily limits)
     if groq_client:
         try:
             msgs = [{"role":"system","content":sp}, {"role":"user","content":full_prompt}]
@@ -190,9 +197,32 @@ def get_response(prompt, image=None, use_search=False):
             st.session_state.groq_request_count += 1
             return r.choices[0].message.content
         except Exception as e:
-            return f"KLMGPT: {str(e)[:200]}"
+            err = str(e)
+            if "invalid" in err.lower() or "authentication" in err.lower() or "api key" in err.lower():
+                groq_client = None
+                pass  # Fall through to Gemini
     
-    return "KLMGPT: All APIs unavailable. Check your API keys."
+    # FALLBACK TO GEMINI (if available)
+    if gemini_available and gemini_model and check_quota():
+        try:
+            if image and gemini_vision:
+                r = gemini_vision.generate_content([full_prompt, image], safety_settings=safeties, generation_config=config)
+            else:
+                r = gemini_model.generate_content(full_prompt, safety_settings=safeties, generation_config=config)
+            increment_counter()
+            return r.text
+        except:
+            pass
+    
+    # If nothing works
+    available = []
+    if groq_client: available.append("Groq")
+    if gemini_available: available.append("Gemini")
+    
+    if not available:
+        return "KLMGPT: No valid API keys found. Please check your secrets.toml file. Gemini key must start with 'AIzaSy'. Groq key must start with 'gsk_'."
+    else:
+        return "KLMGPT: APIs are responding with errors. Check your API keys in Streamlit secrets."
 
 # ============================================================
 # SECRET UNLOCK
@@ -232,18 +262,18 @@ def main_ui():
     """, unsafe_allow_html=True)
     
     current_time = get_kerala_time()
-    can_use_gemini = check_quota()
-    active_model = "Groq" if not can_use_gemini else "Gemini"
+    active = "Groq" if groq_client else ("Gemini" if gemini_available else "No API")
     
     st.markdown(f"# KLMGPT by Hydra Strozzz")
-    st.markdown(f"v1.0 | {current_time} | Active: {active_model}")
+    st.markdown(f"v1.0 | {current_time} | Engine: {active}")
     
     with st.sidebar:
         st.markdown("## KLMGPT")
         st.markdown(f"**Time:** {current_time}")
-        st.markdown(f"**Active Model:** {active_model}")
-        st.markdown(f"**Gemini API:** {st.session_state.request_count}/900")
-        st.markdown(f"**Groq API:** {st.session_state.groq_request_count}")
+        st.markdown(f"**Engine:** {active}")
+        st.markdown(f"**Gemini:** {'OK' if gemini_available else 'Invalid Key'}")
+        st.markdown(f"**Groq:** {'OK' if groq_client else 'Invalid Key'}")
+        st.markdown(f"**Requests:** {st.session_state.groq_request_count}")
         st.markdown(f"**User:** {st.session_state.user_email}")
         st.markdown("---")
         if st.button("Logout"):
@@ -258,7 +288,6 @@ def main_ui():
     
     with tab1:
         st.markdown("## Chat & Hacking")
-        st.markdown(f"{current_time}")
         
         chat_container = st.container()
         with chat_container:
@@ -285,9 +314,8 @@ def main_ui():
             
             st.session_state.chat_history.append({"role":"user","content":user_input})
             
-            with st.spinner(f"Using {active_model}..."):
+            with st.spinner(f"Using {active}..."):
                 resp = get_response(user_input, use_search=use_web)
-                
                 st.markdown(f"<div class='chat-msg'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
                 st.session_state.chat_history.append({"role":"assistant","content":resp})
         
@@ -422,9 +450,6 @@ def login_page():
         st.session_state.login_page=False
         st.rerun()
 
-# ============================================================
-# MAIN
-# ============================================================
 init_state()
 if st.session_state.login_page and not st.session_state.authenticated:
     login_page()
