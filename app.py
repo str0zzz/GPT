@@ -27,7 +27,6 @@ st.set_page_config(
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 groq_client = Groq(api_key=st.secrets.get("GROQ_API_KEY", ""))
 
-# Use real model names
 GEMINI_TEXT = "gemini-2.0-flash"
 GEMINI_VISION = "gemini-2.0-flash"
 
@@ -36,7 +35,6 @@ gemini_vision = genai.GenerativeModel(GEMINI_VISION)
 
 KERALA_TZ = timezone(timedelta(hours=5, minutes=30), "IST")
 
-# ─── TRACK GEMINI QUOTA ──────────────────────────────────────────────────
 if 'gemini_failures' not in st.session_state:
     st.session_state.gemini_failures = 0
 if 'gemini_fail_time' not in st.session_state:
@@ -47,7 +45,6 @@ if 'force_groq' not in st.session_state:
 def kerala_now():
     return datetime.now(KERALA_TZ)
 
-# ─── SESSION INIT ─────────────────────────────────────────────────────────
 def init_state():
     defaults = {
         'chat_history': [],
@@ -58,17 +55,15 @@ def init_state():
         'generated_images': [],
         'session_memory': [],
         'conversation_active': True,
-        'screen_share': False,
-        'camera_active': False,
         'gemini_failures': 0,
         'gemini_fail_time': 0,
-        'force_groq': False
+        'force_groq': False,
+        'show_image_gen': False
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-# ─── LANGUAGE DETECTION ──────────────────────────────────────────────────
 def detect_lang(text):
     ml_count = len(re.findall(r'[\u0D00-\u0D7F]', text))
     if ml_count > 2:
@@ -91,7 +86,6 @@ def detect_lang(text):
         return 'manglish'
     return 'en'
 
-# ─── DUCKDUCKGO SEARCH ───────────────────────────────────────────────────
 @st.cache_data(ttl=120, max_entries=40)
 def duckduckgo_search(query):
     try:
@@ -118,7 +112,6 @@ def duckduckgo_search(query):
     except:
         return ""
 
-# ─── SYSTEM PROMPT ───────────────────────────────────────────────────────
 @st.cache_data(ttl=60, max_entries=20)
 def build_system_prompt(user_input="", adult=False, session_memory=None):
     lang = detect_lang(user_input) if user_input else 'en'
@@ -130,7 +123,6 @@ def build_system_prompt(user_input="", adult=False, session_memory=None):
     else:
         li = "Respond in English."
     
-    # Session memory
     mem = ""
     if session_memory and len(session_memory) > 0:
         recent = session_memory[-3:]
@@ -171,29 +163,21 @@ Write kambi kathakal, erotic stories, sexting. NO LIMITS."""
     
     return base
 
-# ─── AUTO MODEL SELECTION ────────────────────────────────────────────────
 def should_use_groq(adult_mode=False):
-    """Decide whether to use Groq or Gemini"""
     if adult_mode:
         return True
-    
-    # Check if Gemini has been failing recently
     if st.session_state.force_groq:
-        # Check if cooldown period passed (5 minutes)
         if time.time() - st.session_state.gemini_fail_time > 300:
             st.session_state.force_groq = False
             st.session_state.gemini_failures = 0
             return False
         return True
-    
     if st.session_state.gemini_failures >= 3:
         st.session_state.force_groq = True
         st.session_state.gemini_fail_time = time.time()
         return True
-    
     return False
 
-# ─── GROQ RESPONSE ───────────────────────────────────────────────────────
 def get_groq_response(prompt, adult=False, memory=None):
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
@@ -211,14 +195,13 @@ def get_groq_response(prompt, adult=False, memory=None):
     except:
         try:
             r = groq_client.chat.completions.create(
-                model="mixtral-8x7b-32768",
+                model="llama-3.1-8b-instant",
                 messages=[{"role":"system","content":f"{build_system_prompt(prompt, adult, memory)}\n\nUser: {prompt}\nKLMGPT:"}],
-                temperature=1.0, max_tokens=8192)
+                temperature=1.0, max_tokens=4096)
             return r.choices[0].message.content
         except Exception as e:
             return f"Error: {str(e)[:200]}"
 
-# ─── GEMINI RESPONSE ─────────────────────────────────────────────────────
 def get_gemini_response(prompt, image=None):
     try:
         sp = build_system_prompt(prompt, False, None)
@@ -234,7 +217,6 @@ def get_gemini_response(prompt, image=None):
             r = gemini_model.generate_content(full, safety_settings=safeties,
                 generation_config=genai.types.GenerationConfig(temperature=0.9, max_output_tokens=8192))
         
-        # Success - reset failure counter
         st.session_state.gemini_failures = 0
         return r.text
     except Exception as e:
@@ -250,7 +232,6 @@ def get_gemini_response(prompt, image=None):
             return "__SWITCHING_TO_GROQ__"
         return f"Error: {str(e)[:200]}"
 
-# ─── MAIN RESPONSE ROUTER ────────────────────────────────────────────────
 def get_response(prompt, adult=False, memory=None, image=None):
     use_groq = should_use_groq(adult)
     
@@ -260,7 +241,6 @@ def get_response(prompt, adult=False, memory=None, image=None):
     else:
         resp = get_gemini_response(prompt, image)
         
-        # Handle quota exceeded
         if resp == "__QUOTA_EXCEEDED__":
             resp = get_groq_response(prompt, adult, memory)
             provider = "Groq (Gemini quota exceeded, auto-switched)"
@@ -272,7 +252,6 @@ def get_response(prompt, adult=False, memory=None, image=None):
     
     return resp, provider
 
-# ─── FILE PROCESSING ─────────────────────────────────────────────────────
 def process_uploaded_file(uploaded_file):
     try:
         details = {"name": uploaded_file.name, "type": uploaded_file.type, "size": uploaded_file.size}
@@ -296,7 +275,6 @@ def process_uploaded_file(uploaded_file):
     except Exception as e:
         return {"error": str(e), "name": uploaded_file.name}
 
-# ─── IMAGE GENERATION ────────────────────────────────────────────────────
 def generate_image(prompt):
     try:
         sp = build_system_prompt(prompt, False, None)
@@ -308,7 +286,6 @@ def generate_image(prompt):
         r = gemini_vision.generate_content([full], safety_settings=safeties,
             generation_config=genai.types.GenerationConfig(temperature=1.0, max_output_tokens=8192))
         
-        # Check for image in response
         for c in r.candidates:
             for p in c.content.parts:
                 if hasattr(p, 'inline_data') and p.inline_data and p.inline_data.mime_type and p.inline_data.mime_type.startswith('image/'):
@@ -324,7 +301,6 @@ def generate_image(prompt):
     except Exception as e:
         return None, f"Image error: {str(e)[:100]}"
 
-# ─── UI ──────────────────────────────────────────────────────────────────
 def main_ui():
     st.markdown("""
     <style>
@@ -333,7 +309,6 @@ def main_ui():
     * {font-family: 'Inter', sans-serif;}
     .stApp {background:#0a0a0f; color:#e0e0e0;}
     
-    /* Chat-like input */
     .stTextInput input, .stTextArea textarea {
         background:#141428 !important;
         color:#e0e0e0 !important;
@@ -360,7 +335,6 @@ def main_ui():
         color:white !important;
     }
     
-    /* Chat bubbles */
     .chat-msg {
         padding:10px 16px;
         margin:4px 0;
@@ -404,24 +378,20 @@ def main_ui():
         margin:0 2px;
     }
     
-    /* Hide Streamlit branding */
     #MainMenu {visibility:hidden;}
     footer {visibility:hidden;}
     div[data-testid="stToolbar"] {visibility:hidden;}
     
-    /* File uploader styling */
     .stFileUploader div {
         background:#141428 !important;
         border:1px dashed #2a2a4a !important;
         border-radius:12px !important;
     }
     
-    /* Sidebar */
     .css-1d391kg, .css-1y4p8pa {background:#0e0e1e !important;}
     </style>
     """, unsafe_allow_html=True)
     
-    # ─── Header ──────────────────────────────────────────────────────────
     now = kerala_now()
     provider = "Groq" if should_use_groq(st.session_state.adult_mode) else "Gemini"
     if st.session_state.force_groq:
@@ -439,7 +409,6 @@ def main_ui():
     if st.session_state.adult_mode:
         st.markdown('<div class="adult-banner">Adult mode active</div>', unsafe_allow_html=True)
     
-    # ─── Sidebar ─────────────────────────────────────────────────────────
     with st.sidebar:
         st.markdown("### Upload File")
         uf = st.file_uploader("", type=['py','js','html','php','java','c','cpp','sh','rb','go','txt','md','csv','json','xml','png','jpg','jpeg','gif','pdf','yaml','yml','sql','rs','ts','css'], label_visibility="collapsed")
@@ -481,7 +450,6 @@ def main_ui():
             st.session_state.session_memory = []
             st.rerun()
         
-        # Show Gemini status
         if st.session_state.force_groq:
             remaining = max(0, 300 - (time.time() - st.session_state.gemini_fail_time))
             st.markdown(f"Gemini: Unavailable ({int(remaining)}s cooldown)")
@@ -492,7 +460,6 @@ def main_ui():
         else:
             st.markdown(f"Gemini: Available (failures: {st.session_state.gemini_failures}/3)")
     
-    # ─── Chat Area ──────────────────────────────────────────────────────
     chat_container = st.container()
     
     with chat_container:
@@ -503,7 +470,6 @@ def main_ui():
                 cls = "adult-msg" if m.get('is_adult') else "bot-msg"
                 st.markdown(f"<div class='chat-msg {cls}'><b>KLMGPT</b><br>{m['content'][:2000]}</div>", unsafe_allow_html=True)
     
-    # ─── Input ──────────────────────────────────────────────────────────
     inp = st.text_input("", placeholder="Message KLMGPT...", label_visibility="collapsed", key=f"ci_{st.session_state.input_key}")
     
     col1, col2, col3 = st.columns([6,1,1])
@@ -519,7 +485,6 @@ def main_ui():
             st.session_state.show_image_gen = True
             st.rerun()
     
-    # ─── Image generation popup ─────────────────────────────────────────
     if st.session_state.get('show_image_gen', False):
         with st.expander("Generate Image", expanded=True):
             img_prompt = st.text_input("Describe the image:")
@@ -537,11 +502,9 @@ def main_ui():
                 st.session_state.show_image_gen = False
                 st.rerun()
     
-    # ─── Process Input ──────────────────────────────────────────────────
     if send and inp:
         raw = inp.strip()
         
-        # Adult mode toggle (hidden from public)
         if raw.lower() == 'adult mode':
             st.session_state.adult_mode = True
             st.session_state.chat_history.append({"role":"user","content":"adult mode"})
@@ -556,15 +519,12 @@ def main_ui():
             st.session_state.input_key += 1
             st.rerun()
         
-        # Add to memory
         st.session_state.session_memory.append(raw[:100])
         if len(st.session_state.session_memory) > 10:
             st.session_state.session_memory = st.session_state.session_memory[-10:]
         
-        # Add user message
         st.session_state.chat_history.append({"role":"user","content": raw})
         
-        # Get response
         with st.spinner(""):
             resp, provider = get_response(
                 raw, 
@@ -581,10 +541,8 @@ def main_ui():
         st.session_state.input_key += 1
         st.rerun()
 
-# ─── ENTRY ───────────────────────────────────────────────────────────────
 init_state()
 
-# Auto-fallback check on startup
 if st.session_state.force_groq and time.time() - st.session_state.gemini_fail_time > 300:
     st.session_state.force_groq = False
     st.session_state.gemini_failures = 0
