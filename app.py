@@ -13,19 +13,46 @@ import google.generativeai as genai
 import numpy as np
 import streamlit as st
 from groq import Groq
+from openai import OpenAI
 from PIL import Image
 
 st.set_page_config(
     page_title="KLMGPT",
     page_icon="X",
     layout="wide",
-    initial_sidebar_state="expanded")
+    initial_sidebar_state="expanded"
+)
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-# groq_client = Groq(api_key=st.secrets.get("GROQ_API_KEY", ""))
 
-gemini_model = genai.GenerativeModel("models/gemini-2.5-flash")
-gemini_vision = genai.GenerativeModel("models/gemini-2.5-flash")
+# 1. Configuring the Groq Client
+groq_client = Groq(api_key=st.secrets.get("GROQ_API_KEY", ""))
+
+# 2. Configuring the Secret DeepSeek Engine
+deepseek_client = OpenAI(
+    api_key=st.secrets.get("DEEPSEEK_API_KEY", ""),
+    base_url="https://api.deepseek.com"
+)
+
+# 3. Global System Instruction for Language and Date Context
+system_instruction = (
+    "You are KLMGPT, a cutting-edge Penetration Testing Assistant developed by Hydra Strozzz. "
+    "Today's date is June 8, 2026. Always answer based on the current year 2026. "
+    "CRITICAL: Detect the language used by the user. If they talk in Malayalam, reply in Malayalam. "
+    "If they use Manglish (Malayalam written in English script), reply in Manglish itself. "
+    "If they use English, reply in English. Keep all context updated and precise."
+)
+
+# 4. Defining Gemini Models with System Instructions
+gemini_model = genai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    system_instruction=system_instruction
+)
+
+gemini_vision = genai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    system_instruction=system_instruction
+)
 
 def init_state():
     keys = [
