@@ -341,7 +341,7 @@ def main_ui():
     
     with tab1:
         st.markdown("## Chat & Hacking Tools")
-        st.markdown("Malayalam or English - ask anything. Type 'adult mode' to activate adult chat.")
+        st.markdown("Malayalam or English - ask anything.")
         
         if st.session_state.get('adult_mode'):
             st.markdown("<div style='background:#1a0a0a;border:1px solid #ff0066;border-radius:5px;padding:8px;margin:5px 0;text-align:center;color:#ff0066;font-weight:bold;'>ADULT MODE ACTIVE -- Type 'adult mode off' to disable | Kambi kathakal, sex chat, dirty talk available</div>", unsafe_allow_html=True)
