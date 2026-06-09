@@ -634,13 +634,13 @@ def main():
         
         st.markdown("---")
         st.markdown("### Access")
-        # Passive checkbox - tracks last known state to avoid conflict with text commands
+        # Passive checkbox - simply reflects current state
+        # User can click it to toggle adult mode manually
         adult_toggle = st.checkbox("Adult Mode (18+)", value=st.session_state.adult_mode, 
                                    key="adult_checkbox_sidebar")
         
-        # Only trigger when user manually clicks the checkbox (value differs from last tracked state)
-        if adult_toggle != st.session_state.last_adult_checkbox:
-            st.session_state.last_adult_checkbox = adult_toggle
+        # Only trigger when user manually clicks (value differs from actual state)
+        if adult_toggle != st.session_state.adult_mode:
             st.session_state.adult_mode = adult_toggle
             if adult_toggle:
                 st.session_state.chat_history.append({"role": "system", "content": "Adult mode activated. Kambi content enabled."})
@@ -663,39 +663,38 @@ def main():
         # Check for adult mode activation
         if raw_clean in ['adult mode', 'adultmode', 'adult', '+18', '18+']:
             st.session_state.adult_mode = True
-            st.session_state.last_adult_checkbox = True  # Sync checkbox state
             st.session_state.chat_history.append({"role": "user", "content": raw})
             st.session_state.chat_history.append({"role": "assistant", "content": "🔥 **Adult Mode Activated!** 🔥\n\nUse the sidebar toggle or type 'adult mode off' to deactivate. Kambi content enabled.", "is_adult": True})
             st.session_state.input_key += 1
             st.rerun()
         
         # Check for adult mode deactivation
-        if raw_clean in ['adult mode off', 'adultmode off', 'adult off', 'adult_mode off', 'off adult', 'off adult mode']:
+        elif raw_clean in ['adult mode off', 'adultmode off', 'adult off', 'adult_mode off', 'off adult', 'off adult mode']:
             st.session_state.adult_mode = False
-            st.session_state.last_adult_checkbox = False  # Sync checkbox state
             st.session_state.chat_history.append({"role": "user", "content": raw})
             st.session_state.chat_history.append({"role": "assistant", "content": "Adult mode deactivated."})
             st.session_state.input_key += 1
             st.rerun()
         
-        # Regular message processing
-        st.session_state.session_memory.append(raw[:100])
-        if len(st.session_state.session_memory) > 10:
-            st.session_state.session_memory = st.session_state.session_memory[-10:]
-        
-        st.session_state.chat_history.append({"role": "user", "content": raw})
-        
-        with st.spinner(""):
-            resp, provider = get_response(raw, adult=st.session_state.adult_mode, memory=st.session_state.session_memory)
-        
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "content": resp,
-            "is_adult": st.session_state.adult_mode if st.session_state.adult_mode else None
-        })
-        
-        st.session_state.input_key += 1
-        st.rerun()
+        else:
+            # Regular message processing
+            st.session_state.session_memory.append(raw[:100])
+            if len(st.session_state.session_memory) > 10:
+                st.session_state.session_memory = st.session_state.session_memory[-10:]
+            
+            st.session_state.chat_history.append({"role": "user", "content": raw})
+            
+            with st.spinner(""):
+                resp, provider = get_response(raw, adult=st.session_state.adult_mode, memory=st.session_state.session_memory)
+            
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": resp,
+                "is_adult": st.session_state.adult_mode if st.session_state.adult_mode else None
+            })
+            
+            st.session_state.input_key += 1
+            st.rerun()
 
 if __name__ == "__main__":
     main()
