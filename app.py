@@ -414,7 +414,7 @@ def main():
         .empty-state .logo { font-size: 40px; font-weight: 700; opacity: 0.15; margin-bottom: 10px; }
         .empty-state .sub { color: #333 !important; font-size: 14px; }
         
-        /* ─── INPUT AREA WITH + ICON ─── */
+        /* ─── INPUT AREA ─── */
         .input-area {
             position: fixed;
             bottom: 0;
@@ -437,32 +437,13 @@ def main():
         }
         .input-wrap:focus-within { border-color: #2a2a4a; }
         
-        /* + icon on left side of input bar */
-        .input-wrap .plus-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            color: #fff;
-            font-size: 22px;
-            transition: 0.2s;
-            flex-shrink: 0;
-            border: none;
-            background: transparent;
-            margin-left: 4px;
-        }
-        .input-wrap .plus-btn:hover { background: #1a1a2a; }
-        
         .input-wrap input {
             flex: 1;
             background: transparent;
             border: none;
             color: #fff;
             font-size: 14px;
-            padding: 10px 8px;
+            padding: 10px 16px;
             outline: none;
         }
         .input-wrap input::placeholder { color: #555; }
@@ -498,7 +479,36 @@ def main():
             gap: 2px;
         }
         
-        /* ─── FILE UPLOADER HIDDEN ─── */
+        /* ─── BUTTON BAR (below input) ─── */
+        .btn-bar {
+            max-width: 800px;
+            margin: 6px auto 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 4px;
+        }
+        .btn-bar .action-btn {
+            background: transparent;
+            border: 1px solid #222;
+            color: #aaa;
+            font-size: 12px;
+            padding: 4px 14px;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-bar .action-btn:hover {
+            border-color: #444;
+            color: #fff;
+        }
+        .btn-bar .status-text {
+            color: #555;
+            font-size: 11px;
+            margin-left: auto;
+        }
+        
+        /* ─── HIDDEN FILE UPLOADER ─── */
         .file-upload-hidden { display: none; }
         
         /* ─── SCROLLBAR ─── */
@@ -552,47 +562,62 @@ def main():
                 st.markdown(f"<div class='msg bot-msg {cls}'><b>KLMGPT</b><br>{m['content'][:1500]}</div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # ─── FILE UPLOAD (triggered by + icon) ───
-    uploaded_file = st.file_uploader("Upload file", type=['py','js','html','php','java','c','cpp','sh','rb','go','txt','md','csv','json','xml','png','jpg','jpeg','gif','pdf','yaml','yml','sql','rs','ts','css'], key="file_upload_main", label_visibility="collapsed")
-    
-    if uploaded_file:
-        with st.spinner("Analyzing..."):
-            info = process_uploaded_file(uploaded_file)
-            if "error" not in info:
-                st.session_state.uploaded_files_data.append(info)
-                file_msg = f"[Uploaded: {info['name']}]"
-                st.session_state.chat_history.append({"role":"user", "content": file_msg})
-                if info['content_type'] == 'image' and 'image' in info:
-                    resp, _ = get_response("Analyze this image.", adult=False, image=info['image'])
-                elif 'text' in info:
-                    resp, _ = get_response(f"Analyze '{info['name']}':\n```\n{info['text'][:3000]}\n```", adult=False)
-                else:
-                    resp, _ = get_response(f"Uploaded '{info['name']}'.", adult=False)
-                st.session_state.chat_history.append({"role":"assistant", "content": resp})
-                st.rerun()
-            else:
-                st.error(info.get('error'))
-    
-    # ─── INPUT BAR WITH + ICON ───
+    # ─── INPUT BAR (clean - no + icon) ───
     inp = st.text_input("", placeholder="Message KLMGPT...", label_visibility="collapsed", key=f"inp_{st.session_state.input_key}")
     
-    # Buttons below input
+    # ─── BUTTON BAR BELOW INPUT ───
+    st.markdown('<div class="btn-bar">', unsafe_allow_html=True)
+    
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns([1,1,1,1,2])
+    
+    # File upload button
     with col_b1:
-        if st.button("+", key="plus_file_btn", use_container_width=True):
-            st.info("Click the + icon to upload files")
+        upload_clicked = st.button("📁 File", key="file_btn", use_container_width=True)
+    
     with col_b2:
         send = st.button("Send", key="send_msg_btn", type="primary", use_container_width=True)
+    
     with col_b3:
-        if st.button("Img+", key="img_gen_btn", use_container_width=True):
+        if st.button("🖼 Img+", key="img_gen_btn", use_container_width=True):
             st.session_state.show_image_gen = True
             st.rerun()
+    
     with col_b4:
-        if st.button("Live", key="live_toggle_btn", use_container_width=True):
+        if st.button("🎥 Live", key="live_toggle_btn", use_container_width=True):
             st.session_state.show_live = not st.session_state.show_live
             st.rerun()
+    
     with col_b5:
         st.markdown(f'<span style="color:#555;font-size:11px;">{provider} | {lang_label}</span>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # ─── FILE UPLOADER (hidden, triggered by button) ───
+    if upload_clicked:
+        uploaded_file = st.file_uploader(
+            "Upload file",
+            type=['py','js','html','php','java','c','cpp','sh','rb','go','txt','md','csv','json','xml','png','jpg','jpeg','gif','pdf','yaml','yml','sql','rs','ts','css'],
+            key="file_upload_triggered",
+            label_visibility="visible"
+        )
+        
+        if uploaded_file:
+            with st.spinner("Analyzing..."):
+                info = process_uploaded_file(uploaded_file)
+                if "error" not in info:
+                    st.session_state.uploaded_files_data.append(info)
+                    file_msg = f"[Uploaded: {info['name']}]"
+                    st.session_state.chat_history.append({"role":"user", "content": file_msg})
+                    if info['content_type'] == 'image' and 'image' in info:
+                        resp, _ = get_response("Analyze this image.", adult=False, image=info['image'])
+                    elif 'text' in info:
+                        resp, _ = get_response(f"Analyze '{info['name']}':\n```\n{info['text'][:3000]}\n```", adult=False)
+                    else:
+                        resp, _ = get_response(f"Uploaded '{info['name']}'.", adult=False)
+                    st.session_state.chat_history.append({"role":"assistant", "content": resp})
+                    st.rerun()
+                else:
+                    st.error(info.get('error'))
     
     # ─── IMAGE GEN ───
     if st.session_state.show_image_gen:
