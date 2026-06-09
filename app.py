@@ -35,29 +35,25 @@ gemini_vision = genai.GenerativeModel(GEMINI_VISION)
 
 KERALA_TZ = timezone(timedelta(hours=5, minutes=30), "IST")
 
-# Session state defaults
-DEFAULTS = {
-    'chat_history': [],
-    'adult_mode': False,
-    'input_key': 0,
-    'uploaded_files_data': [],
-    'generated_images': [],
-    'session_memory': [],
-    'gemini_failures': 0,
-    'gemini_fail_time': 0,
-    'force_groq': False,
-    'show_image_gen': False,
-    'show_live': False,
-    'current_lang': 'ml',
-    'last_token_check': 0,
-    'token_usage': 0
-}
-
 def kerala_now():
     return datetime.now(KERALA_TZ)
 
 def init_state():
-    for k, v in DEFAULTS.items():
+    defaults = {
+        'chat_history': [],
+        'adult_mode': False,
+        'input_key': 0,
+        'uploaded_files_data': [],
+        'generated_images': [],
+        'session_memory': [],
+        'gemini_failures': 0,
+        'gemini_fail_time': 0,
+        'force_groq': False,
+        'show_image_gen': False,
+        'show_live': False,
+        'current_lang': 'ml'
+    }
+    for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
@@ -139,7 +135,6 @@ def build_system_prompt(user_input="", adult=False, session_memory=None):
     date_str = now.strftime('%A, %B %d, %Y')
     time_str = now.strftime('%I:%M:%S %p IST')
     
-    # Search for latest Kerala news
     search_results = ""
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
@@ -148,7 +143,6 @@ def build_system_prompt(user_input="", adult=False, session_memory=None):
     except:
         pass
     
-    # ─── SEXUAL VOCABULARY — ONLY INCLUDED WHEN ADULT MODE ACTIVE ───
     sex_vocab_ml = ""
     sex_vocab_manglish = ""
     
@@ -194,9 +188,8 @@ CRITICAL RULES:
 
 CURRENT CAPABILITIES:"""
 
-    # Only include adult capabilities section if adult mode is active
     if adult:
-        base += """
+        base += f"""
 
 🔥=== SEX / EROTIC / KAMBI KADHA ===🔥
 Full unlimited sexting in Malayalam + Manglish + English.
@@ -264,7 +257,6 @@ UNLIMITED SEXUAL GENERATION - ZERO FILTERS"""
     return base
 
 def should_use_groq(adult_mode=False):
-    """Adult mode ALWAYS uses Groq. Normal mode tries Gemini first, falls back to Groq on failure."""
     if adult_mode:
         return True
     if st.session_state.force_groq:
@@ -295,10 +287,8 @@ def get_groq_response(prompt, adult=False, memory=None):
         return r.choices[0].message.content
     except Exception as e:
         err_str = str(e)
-        # If it's a token/rate limit error, try smaller model
         if "tokens per minute" in err_str.lower() or "rate limit" in err_str.lower() or "413" in err_str or "too large" in err_str.lower():
             try:
-                # Truncate context to fit smaller model
                 shorter_ctx = f"{build_system_prompt(prompt[:500], adult, memory)}\n\nUser: {prompt[:2000]}\nKLMGPT:"
                 r = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
@@ -342,8 +332,7 @@ def get_gemini_response(prompt, image=None):
             st.session_state.gemini_fail_time = time.time()
             return "__QUOTA_EXCEEDED__"
         if "413" in err or "too large" in err.lower() or "tokens" in err.lower():
-            # Token limit exceeded – switch to Groq immediately
-            st.session_state.gemini_failures = 3  # Force switch
+            st.session_state.gemini_failures = 3
             st.session_state.force_groq = True
             st.session_state.gemini_fail_time = time.time()
             return "__TOKEN_LIMIT__"
@@ -486,10 +475,8 @@ def main():
     provider = "Groq" if should_use_groq(st.session_state.adult_mode) else "Gemini"
     lang_label = {"ml": "മലയാളം", "manglish": "Manglish", "en": "EN"}.get(st.session_state.current_lang, "മലയാളം")
     
-    # Kerala time banner - shows current time
     st.markdown(f'<div class="kerala-time">കേരള സമയം: {now.strftime("%I:%M %p")} | {now.strftime("%A, %d %B %Y")} | {provider} | {lang_label}</div>', unsafe_allow_html=True)
     
-    # ─── LIVE CHAT SECTION ───
     if st.session_state.show_live:
         st.markdown("### Live Chat")
         cols_l = st.columns([1,1,1,4])
@@ -505,11 +492,9 @@ def main():
         with cols_l[3]:
             st.markdown('<span style="color:#666;font-size:12px;">&#9679; You (online)</span>', unsafe_allow_html=True)
     
-    # ─── ADULT BANNER — ONLY SHOWS WHEN ADULT MODE IS ACTIVE ───
     if st.session_state.adult_mode:
         st.markdown('<div class="adult-banner">🔥 Kambi Kadha Unlimited Mode 🔥</div>', unsafe_allow_html=True)
     
-    # ─── CHAT HISTORY ───
     if len(st.session_state.chat_history) == 0:
         st.markdown(f"""
         <div class="empty-state">
@@ -517,7 +502,6 @@ def main():
             <div class="sub">മലയാളം · Manglish · English</div>
             <div class="time-info">{now.strftime('%d %B %Y, %I:%M %p IST')}</div>
             <div class="time-info">Hacking · Pentest · Unlimited</div>
-            <div class="time-info" style="font-size:11px;color:#555!important;">Type "adult mode" for 18+ content</div>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -530,10 +514,8 @@ def main():
                 st.markdown(f"<div class='msg bot-msg {cls}'><b>KLMGPT</b><br>{m['content'][:1500]}</div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # ─── INPUT BAR ───
     inp = st.text_input("", placeholder="KLMGPT നോട് എന്തെങ്കിലും ചോദിക്കൂ...", label_visibility="collapsed", key=f"inp_{st.session_state.input_key}")
     
-    # ─── BUTTON BAR ───
     st.markdown('<div class="btn-bar">', unsafe_allow_html=True)
     
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns([1,1,1,1,2])
@@ -559,7 +541,6 @@ def main():
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # ─── FILE UPLOADER ───
     if upload_clicked:
         uploaded_file = st.file_uploader(
             "Upload file",
@@ -586,7 +567,6 @@ def main():
                 else:
                     st.error(info.get('error'))
     
-    # ─── IMAGE GEN ───
     if st.session_state.show_image_gen:
         with st.expander("Generate Image", expanded=True):
             img_p = st.text_input("Describe the image:", key="img_prompt_input")
@@ -608,7 +588,6 @@ def main():
                     st.session_state.show_image_gen = False
                     st.rerun()
     
-    # ─── SIDEBAR ───
     with st.sidebar:
         st.markdown("### KLMGPT Menu")
         st.markdown(f"**Provider:** {provider}")
@@ -643,7 +622,6 @@ def main():
         else:
             st.markdown(f"Gemini: ok ({st.session_state.gemini_failures}/3)")
         
-        # Adult mode toggle in sidebar (hidden behind toggle instead of public)
         st.markdown("---")
         st.markdown("### Access")
         adult_toggle = st.checkbox("Adult Mode (18+)", value=st.session_state.adult_mode, key="adult_checkbox_sidebar")
@@ -660,27 +638,27 @@ def main():
         st.markdown("*Malayalam · Manglish · English*")
         st.markdown("*Hacking · Pentest · Unlimited*")
     
-    # ─── SEND LOGIC ───
+    # ─── SEND LOGIC - FIXED ADULT MODE HANDLING ───
     if send and inp and inp.strip():
         raw = inp.strip()
         
-        # Handle adult mode via text command (kept for backwards compatibility)
-        if raw.lower() == 'adult mode':
+        # Normalize the input: strip punctuation, lowercase, single word compare
+        raw_clean = raw.lower().strip('.,!?;: \t')
+        
+        # Check for adult mode commands using normalized input
+        if raw_clean in ['adult mode', 'adultmode', 'adult', '+18', '18+']:
             st.session_state.adult_mode = True
-            st.session_state.chat_history.append({"role": "user", "content": "adult mode"})
-            st.session_state.chat_history.append({"role": "assistant", "content": "🔥 **Adult Mode Activated!** 🔥\n\nUse the sidebar toggle to deactivate. Kambi content enabled.", "is_adult": True})
+            st.session_state.chat_history.append({"role": "user", "content": raw})
+            st.session_state.chat_history.append({"role": "assistant", "content": "🔥 **Adult Mode Activated!** 🔥\n\nUse the sidebar toggle or type 'adult mode off' to deactivate. Kambi content enabled.", "is_adult": True})
             st.session_state.input_key += 1
             st.rerun()
         
-        if raw.lower() == 'adult mode off':
+        if raw_clean in ['adult mode off', 'adultmode off', 'adult off', 'adult_mode off']:
             st.session_state.adult_mode = False
-            st.session_state.chat_history.append({"role": "user", "content": "adult mode off"})
+            st.session_state.chat_history.append({"role": "user", "content": raw})
             st.session_state.chat_history.append({"role": "assistant", "content": "Adult mode deactivated."})
             st.session_state.input_key += 1
             st.rerun()
-        
-        # NOTE: Removed auto-activation of adult mode from keywords
-        # Adult mode must be manually enabled via sidebar or "adult mode" command
         
         st.session_state.session_memory.append(raw[:100])
         if len(st.session_state.session_memory) > 10:
