@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 import gzip
 import concurrent.futures
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -41,6 +42,12 @@ if 'gemini_fail_time' not in st.session_state:
     st.session_state.gemini_fail_time = 0
 if 'force_groq' not in st.session_state:
     st.session_state.force_groq = False
+if 'live_chat_active' not in st.session_state:
+    st.session_state.live_chat_active = False
+if 'live_chat_mode' not in st.session_state:
+    st.session_state.live_chat_mode = None  # 'audio', 'video', 'screen'
+if 'live_chat_messages' not in st.session_state:
+    st.session_state.live_chat_messages = []
 
 def kerala_now():
     return datetime.now(KERALA_TZ)
@@ -58,7 +65,11 @@ def init_state():
         'gemini_failures': 0,
         'gemini_fail_time': 0,
         'force_groq': False,
-        'show_image_gen': False
+        'show_image_gen': False,
+        'live_chat_active': False,
+        'live_chat_mode': None,
+        'live_chat_messages': [],
+        'show_live_chat': False
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -324,163 +335,120 @@ def main_ui():
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
     
-    /* ─── FULL BLACK BACKGROUND ─── */
-    .stApp, .main, .block-container, .css-1d391kg, .css-1y4p8pa,
-    div[data-testid="stAppViewContainer"], div[data-testid="stAppViewBlockContainer"],
-    section[data-testid="stSidebar"], div[data-testid="stToolbar"] {
+    /* ─── PURE BLACK BACKGROUND ─── */
+    .stApp, .main, .block-container,
+    div[data-testid="stAppViewContainer"],
+    section[data-testid="stSidebar"],
+    div[data-testid="stSidebarContent"] {
         background: #000000 !important;
     }
     
-    * {font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;}
-    .stApp {background:#000000 !important; color:#e0e0e0;}
+    * {font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;}
+    .stApp {background:#000000 !important;}
+    
+    /* ─── WHITE TEXT EVERYWHERE ─── */
+    body, p, span, div, h1, h2, h3, h4, h5, h6, label, .stMarkdown, .stText {
+        color: #ffffff !important;
+    }
     
     /* ─── TOP BAR ─── */
     .top-bar {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 12px 16px;
+        padding: 10px 14px;
         background: #000000;
         border-bottom: 1px solid #1a1a1a;
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        z-index: 100;
+        z-index: 1000;
+        height: 50px;
     }
-    .top-bar .menu-icon, .top-bar .history-icon {
+    .top-bar-left {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+    .top-bar-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .tb-icon {
         color: #ffffff;
-        font-size: 22px;
+        font-size: 20px;
         cursor: pointer;
-        opacity: 0.85;
+        opacity: 0.8;
         transition: opacity 0.2s;
         line-height: 1;
+        user-select: none;
     }
-    .top-bar .menu-icon:hover, .top-bar .history-icon:hover {
-        opacity: 1;
+    .tb-icon:hover { opacity: 1; }
+    .tb-text {
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        opacity: 0.9;
+    }
+    .tb-badge {
+        background: #1a1a2a;
+        color: #ffffff;
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        border: 1px solid #2a2a3a;
     }
     
-    /* ─── CENTER EMPTY STATE ─── */
+    /* ─── EMPTY STATE ─── */
     .empty-state {
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        height: calc(100vh - 140px);
-        color: #2a2a2a;
+        height: calc(100vh - 130px);
         text-align: center;
         padding: 20px;
     }
-    .empty-state .sparkle {
-        font-size: 48px;
-        margin-bottom: 16px;
-        opacity: 0.15;
-    }
-    .empty-state p {
-        font-size: 14px;
-        color: #222;
-        letter-spacing: 0.3px;
-        max-width: 260px;
-        line-height: 1.5;
-    }
-    
-    /* ─── BOTTOM INPUT BAR ─── */
-    .bottom-input {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        padding: 12px 16px 20px;
-        background: #000000;
-        border-top: 1px solid #1a1a1a;
-        z-index: 100;
-    }
-    .input-row {
-        display: flex;
-        align-items: center;
-        background: #111118;
-        border: 1px solid #222233;
-        border-radius: 28px;
-        padding: 4px 6px 4px 16px;
-        transition: border-color 0.2s;
-    }
-    .input-row:focus-within {
-        border-color: #333355;
-    }
-    .input-row .icon-btn {
+    .empty-state .logo-text {
+        font-size: 32px;
+        font-weight: 700;
         color: #ffffff;
-        font-size: 20px;
-        cursor: pointer;
-        opacity: 0.5;
-        transition: opacity 0.2s;
-        padding: 6px;
-        line-height: 1;
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
+        letter-spacing: 2px;
+        opacity: 0.3;
+        margin-bottom: 8px;
     }
-    .input-row .icon-btn:hover {
-        opacity: 0.85;
-    }
-    .input-row input {
-        flex: 1;
-        background: transparent;
-        border: none;
-        color: #ffffff;
-        font-size: 15px;
-        padding: 10px 8px;
-        outline: none;
-        min-width: 0;
-    }
-    .input-row input::placeholder {
-        color: #555566;
-        font-weight: 400;
-    }
-    .input-row .right-icons {
-        display: flex;
-        align-items: center;
-        gap: 2px;
-        flex-shrink: 0;
+    .empty-state .sub {
+        font-size: 13px;
+        color: #333;
+        letter-spacing: 1px;
     }
     
-    /* ─── Tweaks for Streamlit overrides ─── */
-    #MainMenu {visibility:hidden;}
-    footer {visibility:hidden;}
-    div[data-testid="stToolbar"] {visibility:hidden;}
-    div[data-testid="stVerticalBlock"] {gap:0px !important;}
-    
-    .stTextInput input, .stTextArea textarea, .stTextInput, .stTextArea {
-        display: none !important;
-    }
-    .stButton button {
-        display: none !important;
-    }
-    .stFileUploader, .stFileUploader div {
-        display: none !important;
-    }
-    
-    /* ─── Chat messages area ─── */
+    /* ─── CHAT AREA ─── */
     .chat-area {
-        padding: 60px 16px 80px;
+        padding: 55px 14px 90px;
         background: #000000;
     }
     .chat-msg {
-        padding: 10px 16px;
+        padding: 10px 14px;
         margin: 4px 0;
-        border-radius: 12px;
+        border-radius: 10px;
         font-size: 14px;
         line-height: 1.5;
+        color: #ffffff !important;
     }
     .user-msg {
         background:#111122;
         border:1px solid #1a1a2a;
         text-align:right;
-        margin-left: 40px;
+        margin-left: 30px;
     }
     .bot-msg {
         background:#0a0a14;
         border:1px solid #141420;
-        margin-right: 40px;
+        margin-right: 30px;
     }
     .adult-msg {
         border-left:3px solid #ff3366;
@@ -489,23 +457,138 @@ def main_ui():
     .adult-banner {
         background:#0a0610;
         border:1px solid #ff3366;
-        border-radius:8px;
-        padding:6px 12px;
+        border-radius:6px;
+        padding:4px 10px;
         text-align:center;
-        color:#ff6699;
-        font-size:12px;
-        margin:4px 16px;
-    }
-    .tag {
-        color:#555568;
+        color:#ff6699 !important;
         font-size:11px;
-        background:#0a0a14;
-        padding:2px 8px;
-        border-radius:12px;
-        border:1px solid #1a1a2a;
-        display:inline-block;
-        margin:0 2px;
+        margin:2px 14px;
     }
+    
+    /* ─── BOTTOM INPUT ─── */
+    .bottom-input {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 8px 14px 16px;
+        background: #000000;
+        border-top: 1px solid #1a1a1a;
+        z-index: 1000;
+    }
+    .input-row {
+        display: flex;
+        align-items: center;
+        background: #111118;
+        border: 1px solid #1a1a2a;
+        border-radius: 24px;
+        padding: 3px 5px 3px 14px;
+    }
+    .input-row:focus-within {
+        border-color: #333355;
+    }
+    .input-row .icon-btn {
+        color: #ffffff;
+        font-size: 18px;
+        cursor: pointer;
+        opacity: 0.5;
+        transition: opacity 0.2s;
+        padding: 6px;
+        line-height: 1;
+        flex-shrink: 0;
+    }
+    .input-row .icon-btn:hover { opacity: 0.85; }
+    .input-row input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: #ffffff;
+        font-size: 14px;
+        padding: 9px 6px;
+        outline: none;
+        min-width: 0;
+    }
+    .input-row input::placeholder {
+        color: #555566;
+    }
+    .input-row .right-icons {
+        display: flex;
+        align-items: center;
+        gap: 1px;
+        flex-shrink: 0;
+    }
+    
+    /* ─── LIVE CHAT OVERLAY ─── */
+    .live-overlay {
+        position: fixed;
+        top: 50px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #000000;
+        z-index: 999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    .live-controls {
+        display: flex;
+        gap: 20px;
+        margin-top: 30px;
+    }
+    .live-btn {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        border: 2px solid #333;
+        background: #111;
+        color: #ffffff;
+        font-size: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .live-btn:hover {
+        border-color: #5555ff;
+        background: #1a1a3a;
+    }
+    .live-btn.active {
+        border-color: #ff3366;
+        background: #2a0a1a;
+    }
+    .live-users {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+    .live-user {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        border: 2px solid #2a2a3a;
+        background: #111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+    }
+    .live-user.online {
+        border-color: #33ff66;
+    }
+    
+    /* ─── MISC ─── */
+    #MainMenu {visibility:hidden;}
+    footer {visibility:hidden;}
+    div[data-testid="stToolbar"] {visibility:hidden;}
+    div[data-testid="stVerticalBlock"] {gap:0px !important;}
+    .stTextInput input, .stTextArea textarea, .stTextInput, .stTextArea {
+        display: none !important;
+    }
+    .stButton button { display: none !important; }
+    .stFileUploader, .stFileUploader div { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
     
@@ -517,8 +600,19 @@ def main_ui():
     # ─── TOP BAR ───
     st.markdown(f"""
     <div class="top-bar">
-        <div class="menu-icon">&#9776;</div>
-        <div class="history-icon">&#128196;</div>
+        <div class="top-bar-left">
+            <span class="tb-icon">&#9776;</span>
+            <span class="tb-text">KLMGPT</span>
+            <span class="tb-badge">{provider}</span>
+        </div>
+        <div class="top-bar-right">
+            <span class="tb-icon" title="Live Chat" id="live-toggle-btn" onclick="
+                var el = document.getElementById('live-overlay');
+                if(el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+            ">&#128172;</span>
+            <span class="tb-icon" title="History">&#128196;</span>
+            <span class="tb-icon" title="Settings">&#9881;</span>
+        </div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -526,14 +620,49 @@ def main_ui():
     if st.session_state.adult_mode:
         st.markdown('<div class="adult-banner">Adult mode active</div>', unsafe_allow_html=True)
     
+    # ─── LIVE CHAT OVERLAY ───
+    live_display = "flex" if st.session_state.get('show_live_chat', False) else "none"
+    st.markdown(f"""
+    <div id="live-overlay" class="live-overlay" style="display:{live_display};">
+        <div style="color:#ffffff; font-size:18px; font-weight:500; margin-bottom:10px;">Live Chat</div>
+        <div style="color:#555; font-size:13px; margin-bottom:20px;">Connect with others in real-time</div>
+        
+        <div class="live-users">
+            <div class="live-user online">&#128100;</div>
+            <div class="live-user">&#128100;</div>
+            <div class="live-user">&#128100;</div>
+        </div>
+        <div style="color:#555; font-size:12px; margin-bottom:20px;">
+            <span style="color:#33ff66;">&#9679;</span> You (online) &nbsp;&nbsp;
+            <span style="color:#555;">&#9679;</span> 2 others
+        </div>
+        
+        <div class="live-controls">
+            <div class="live-btn" title="Audio Call" onclick="this.classList.toggle('active');">&#127908;</div>
+            <div class="live-btn" title="Video Call" onclick="this.classList.toggle('active');">&#127916;</div>
+            <div class="live-btn" title="Screen Share" onclick="this.classList.toggle('active');">&#128424;</div>
+        </div>
+        
+        <div style="margin-top:30px; color:#555; font-size:12px; text-align:center; max-width:300px;">
+            Tap an icon to start. Your camera/mic will be requested.
+        </div>
+        
+        <div style="margin-top:15px;">
+            <span style="color:#888; font-size:13px; cursor:pointer;" onclick="
+                document.getElementById('live-overlay').style.display='none';
+            ">Close</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
     # ─── CHAT AREA ───
     st.markdown('<div class="chat-area">', unsafe_allow_html=True)
     
     if len(st.session_state.chat_history) == 0:
         st.markdown("""
         <div class="empty-state">
-            <div class="sparkle">&#10022;</div>
-            <p>Start a conversation</p>
+            <div class="logo-text">KLMGPT</div>
+            <div class="sub">Start a conversation</div>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -546,32 +675,36 @@ def main_ui():
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # ─── HIDDEN STREAMLIT INPUT (for backend) ───
+    # ─── HIDDEN STREAMLIT INPUT ───
     inp = st.text_input("", placeholder="Message me...", label_visibility="collapsed", key=f"ci_{st.session_state.input_key}")
     
-    # ─── BOTTOM INPUT BAR (HTML/CSS/JS) ───
+    # ─── BOTTOM INPUT BAR ───
     st.markdown(f"""
     <div class="bottom-input">
         <div class="input-row">
             <span class="icon-btn" id="attach-btn" title="Attach file">&#43;</span>
             <input type="text" id="msg-input" placeholder="Message me..." autocomplete="off"
                    onkeydown="if(event.key==='Enter' && this.value.trim()!==''){{ 
-                       const ev = new Event('input', {{bubbles:true}});
                        document.querySelector('input[placeholder*=\\'Message me\\']').value = this.value;
-                       document.querySelector('input[placeholder*=\\'Message me\\']').dispatchEvent(ev);
-                       const btn = document.querySelector('.stButton button');
-                       if(btn) btn.click();
+                       document.querySelector('input[placeholder*=\\'Message me\\']').dispatchEvent(new Event('input', {{bubbles:true}}));
+                       var btns = document.querySelectorAll('button');
+                       for(var b of btns){{ if(b.innerText.includes('Send')||b.innerText.includes('send')){{ b.click(); break; }} }}
                        this.value = '';
                    }}">
             <div class="right-icons">
                 <span class="icon-btn" title="Voice input">&#127908;</span>
-                <span class="icon-btn" title="Voice-to-text" style="opacity:0.65;">&#9835;</span>
+                <span class="icon-btn" title="Voice-to-text">&#9835;</span>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # ─── SIDEBAR CONTENT (hidden behind hamburger) ───
+    # ─── Live chat toggle via button (hidden, triggered by JS) ───
+    if st.button("Toggle Live", key="toggle_live_btn"):
+        st.session_state.show_live_chat = not st.session_state.show_live_chat
+        st.rerun()
+    
+    # ─── SIDEBAR ───
     with st.sidebar:
         st.markdown("### Upload")
         uf = st.file_uploader("", type=['py','js','html','php','java','c','cpp','sh','rb','go','txt','md','csv','json','xml','png','jpg','jpeg','gif','pdf','yaml','yml','sql','rs','ts','css'], label_visibility="collapsed")
@@ -582,17 +715,14 @@ def main_ui():
                 if "error" not in info:
                     st.session_state.uploaded_files_data.append(info)
                     st.success(f"{info['name']} loaded")
-                    
                     file_msg = f"[Uploaded: {info['name']}]"
                     st.session_state.chat_history.append({"role":"user","content": file_msg})
-                    
                     if info['content_type'] == 'image' and 'image' in info:
                         resp, _ = get_response("Analyze this image.", adult=False, image=info['image'])
                     elif 'text' in info:
                         resp, _ = get_response(f"Analyze '{info['name']}':\n```\n{info['text'][:3000]}\n```", adult=False)
                     else:
                         resp, _ = get_response(f"Uploaded '{info['name']}'.", adult=False)
-                    
                     st.session_state.chat_history.append({"role":"assistant","content": resp})
                     st.rerun()
                 else:
@@ -608,12 +738,13 @@ def main_ui():
         
         st.markdown("---")
         st.markdown("### Settings")
-        
         if st.button("New Chat"):
             st.session_state.chat_history = []
             st.session_state.session_memory = []
             st.rerun()
-        
+        if st.button("Toggle Live Chat"):
+            st.session_state.show_live_chat = not st.session_state.show_live_chat
+            st.rerun()
         if st.session_state.force_groq:
             remaining = max(0, 300 - (time.time() - st.session_state.gemini_fail_time))
             st.markdown(f"Gemini cooldown: {int(remaining)}s")
