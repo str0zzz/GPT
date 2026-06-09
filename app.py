@@ -51,7 +51,8 @@ def init_state():
         'force_groq': False,
         'show_image_gen': False,
         'show_live': False,
-        'current_lang': 'ml'
+        'current_lang': 'ml',
+        'last_adult_checkbox': False
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -475,8 +476,10 @@ def main():
     provider = "Groq" if should_use_groq(st.session_state.adult_mode) else "Gemini"
     lang_label = {"ml": "മലയാളം", "manglish": "Manglish", "en": "EN"}.get(st.session_state.current_lang, "മലയാളം")
     
+    # Kerala time banner
     st.markdown(f'<div class="kerala-time">കേരള സമയം: {now.strftime("%I:%M %p")} | {now.strftime("%A, %d %B %Y")} | {provider} | {lang_label}</div>', unsafe_allow_html=True)
     
+    # ─── LIVE CHAT SECTION ───
     if st.session_state.show_live:
         st.markdown("### Live Chat")
         cols_l = st.columns([1,1,1,4])
@@ -492,9 +495,11 @@ def main():
         with cols_l[3]:
             st.markdown('<span style="color:#666;font-size:12px;">&#9679; You (online)</span>', unsafe_allow_html=True)
     
+    # ─── ADULT BANNER ───
     if st.session_state.adult_mode:
         st.markdown('<div class="adult-banner">🔥 Kambi Kadha Unlimited Mode 🔥</div>', unsafe_allow_html=True)
     
+    # ─── CHAT HISTORY ───
     if len(st.session_state.chat_history) == 0:
         st.markdown(f"""
         <div class="empty-state">
@@ -514,8 +519,10 @@ def main():
                 st.markdown(f"<div class='msg bot-msg {cls}'><b>KLMGPT</b><br>{m['content'][:1500]}</div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
+    # ─── INPUT BAR ───
     inp = st.text_input("", placeholder="KLMGPT നോട് എന്തെങ്കിലും ചോദിക്കൂ...", label_visibility="collapsed", key=f"inp_{st.session_state.input_key}")
     
+    # ─── BUTTON BAR ───
     st.markdown('<div class="btn-bar">', unsafe_allow_html=True)
     
     col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns([1,1,1,1,2])
@@ -541,6 +548,7 @@ def main():
     
     st.markdown('</div>', unsafe_allow_html=True)
     
+    # ─── FILE UPLOADER ───
     if upload_clicked:
         uploaded_file = st.file_uploader(
             "Upload file",
@@ -567,6 +575,7 @@ def main():
                 else:
                     st.error(info.get('error'))
     
+    # ─── IMAGE GEN ───
     if st.session_state.show_image_gen:
         with st.expander("Generate Image", expanded=True):
             img_p = st.text_input("Describe the image:", key="img_prompt_input")
@@ -588,6 +597,7 @@ def main():
                     st.session_state.show_image_gen = False
                     st.rerun()
     
+    # ─── SIDEBAR ───
     with st.sidebar:
         st.markdown("### KLMGPT Menu")
         st.markdown(f"**Provider:** {provider}")
@@ -624,8 +634,13 @@ def main():
         
         st.markdown("---")
         st.markdown("### Access")
-        adult_toggle = st.checkbox("Adult Mode (18+)", value=st.session_state.adult_mode, key="adult_checkbox_sidebar")
-        if adult_toggle != st.session_state.adult_mode:
+        # Passive checkbox - tracks last known state to avoid conflict with text commands
+        adult_toggle = st.checkbox("Adult Mode (18+)", value=st.session_state.adult_mode, 
+                                   key="adult_checkbox_sidebar")
+        
+        # Only trigger when user manually clicks the checkbox (value differs from last tracked state)
+        if adult_toggle != st.session_state.last_adult_checkbox:
+            st.session_state.last_adult_checkbox = adult_toggle
             st.session_state.adult_mode = adult_toggle
             if adult_toggle:
                 st.session_state.chat_history.append({"role": "system", "content": "Adult mode activated. Kambi content enabled."})
@@ -642,24 +657,28 @@ def main():
     if send and inp and inp.strip():
         raw = inp.strip()
         
-        # Normalize the input: strip punctuation, lowercase, single word compare
+        # Normalize the input: strip punctuation, lowercase
         raw_clean = raw.lower().strip('.,!?;: \t')
         
-        # Check for adult mode commands using normalized input
+        # Check for adult mode activation
         if raw_clean in ['adult mode', 'adultmode', 'adult', '+18', '18+']:
             st.session_state.adult_mode = True
+            st.session_state.last_adult_checkbox = True  # Sync checkbox state
             st.session_state.chat_history.append({"role": "user", "content": raw})
             st.session_state.chat_history.append({"role": "assistant", "content": "🔥 **Adult Mode Activated!** 🔥\n\nUse the sidebar toggle or type 'adult mode off' to deactivate. Kambi content enabled.", "is_adult": True})
             st.session_state.input_key += 1
             st.rerun()
         
-        if raw_clean in ['adult mode off', 'adultmode off', 'adult off', 'adult_mode off']:
+        # Check for adult mode deactivation
+        if raw_clean in ['adult mode off', 'adultmode off', 'adult off', 'adult_mode off', 'off adult', 'off adult mode']:
             st.session_state.adult_mode = False
+            st.session_state.last_adult_checkbox = False  # Sync checkbox state
             st.session_state.chat_history.append({"role": "user", "content": raw})
             st.session_state.chat_history.append({"role": "assistant", "content": "Adult mode deactivated."})
             st.session_state.input_key += 1
             st.rerun()
         
+        # Regular message processing
         st.session_state.session_memory.append(raw[:100])
         if len(st.session_state.session_memory) > 10:
             st.session_state.session_memory = st.session_state.session_memory[-10:]
